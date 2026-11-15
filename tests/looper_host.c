@@ -25,8 +25,9 @@ static void block(uint32_t bpm_x10,uint32_t playing) {
 static void run(uint32_t frames,uint32_t bpm_x10,uint32_t playing) {for(uint32_t f=0;f<frames;f+=N)block(bpm_x10,playing);}
 /* A pedal press as the UI sends it: 0 -> 1, then the M4 sets it back to 0. */
 static void press(unsigned id) {pl_event(&p,id,1);pl_event(&p,id,0);}
+#define B16 ((int16_t *)g.buffer)
 static void setup(uint32_t cap) {
-    float *buffer=calloc((size_t)cap*2u,sizeof(float));
+    float *buffer=calloc((size_t)cap*PL_FRAME/sizeof(float)+1u,sizeof(float));
     g_reset(&g,0,buffer);pl_reset(&p,0,cap);
     g.mode=1;g.density=2;g.freeze=0;
     pl_event(&p,LP_REC,0);pl_event(&p,LP_STOP,0);pl_event(&p,LP_CLEAR,0);
@@ -39,7 +40,9 @@ int main(void) {
     CHECK(pl_length(1200,2,PL_CAP_MAX,&bars)==192000u && bars==2,"2 bars @120");
     CHECK(pl_length(600,2,PL_CAP_MAX,&bars)==384000u && bars==2,"2 bars @60 fill the cap");
     CHECK(pl_length(400,2,PL_CAP_MAX,&bars)==288000u && bars==1,"too long: 1 bar");
-    CHECK(pl_length(1200,2,G_CAP,&bars)==96000u && bars==1,"fallback buffer: 1 bar");
+    CHECK(pl_length(1200,2,G_BYTES/PL_FRAME,&bars)==192000u && bars==2,"tested 768 KB buffer holds 2 bars at 120 BPM in 16-bit");
+    CHECK(pl_length(1000,2,G_BYTES/PL_FRAME,&bars)==115200u && bars==1,"... and 1 bar at 100 BPM");
+    CHECK(pl_q(1.f)==16384 && pl_q(-2.5f)==-32767 && pl_q(2.5f)==32767 && pl_q(0.f/0.f)==-32767 && pl_f(pl_q(.123f))-.123f<1.f/PL_SCALE,"16-bit conversion: scale, saturation, rounding");
     CHECK(g.position==0,"static zero before setup");
 
     /* Defaults match the UI. */
@@ -60,20 +63,20 @@ int main(void) {
     CHECK(p.state==PL_PLAY && p.pos==0,"auto play after one bar");
     run(48000u,1200,0);block(1200,0);
     { uint32_t lp=(sample-N-start)%96000u;float want=input_at(start+lp);
-      CHECK(fabsf(out_l[0]-want)<1e-6f && fabsf(out_r[0]+want)<1e-6f,"playback matches the take"); }
+      CHECK(out_l[0]==pl_f(pl_q(want)) && out_r[0]==pl_f(pl_q(-want)),"playback is the take, within one 16-bit step"); }
 
     /* Level scales the loop only. */
     g.position=500;block(1200,0);block(1200,0);
-    { uint32_t lp=(sample-N-start)%96000u;CHECK(fabsf(out_l[0]-.5f*input_at(start+lp))<1e-6f,"Level 50%% halves the loop"); }
+    { uint32_t lp=(sample-N-start)%96000u;CHECK(fabsf(out_l[0]-.5f*pl_f(pl_q(input_at(start+lp))))<1e-6f,"Level 50%% halves the loop"); }
     g.position=1000;block(1200,0);
 
     /* REC while playing: DUB adds input; REC again: back to PLAY. */
-    float before=g.buffer[2u*50000u];
+    int16_t before=B16[2u*50000u];
     press(LP_REC);block(1200,0);CHECK(p.state==PL_DUB,"REC while playing starts overdub");
     run(96000u,1200,0);
-    CHECK(g.buffer[2u*50000u]!=before,"overdub changed the loop");
+    CHECK(B16[2u*50000u]!=before,"overdub changed the loop");
     press(LP_REC);block(1200,0);CHECK(p.state==PL_PLAY,"REC again ends overdub");
-    { float m=0.f;for(uint32_t i=0;i<96000u*2u;i++){float a=fabsf(g.buffer[i]);if(a>m)m=a;}CHECK(m<=2.f,"overdub bounded (%f)",m); }
+    { int m=0;for(uint32_t i=0;i<96000u*2u;i++){int a=abs(B16[i]);if(a>m)m=a;}CHECK(m<=32767 && m>16384,"overdub saturates within +/-2.0 (peak %d)",m); }
 
     /* STOP / STOP: stop, then play from the start. REC when stopped plays too. */
     press(LP_STOP);block(1200,0);CHECK(p.state==PL_STOP,"STOP stops");

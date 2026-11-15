@@ -392,7 +392,7 @@ unsigned dly_process(uint8_t *obj, void *ctx)
 #ifdef PHRASE_LOOPER
             uint32_t bpm_x10,playing;
             pl_tempo_read(&bpm_x10,&playing);
-            if(PL->magic!=PL_MAGIC || PL->owner!=obj)pl_reset(PL,obj,G_CAP);
+            if(PL->magic!=PL_MAGIC || PL->owner!=obj)pl_reset(PL,obj,G_BYTES/PL_FRAME);
             pl_render_o2(PL,GS,bpm_x10,playing,input[0],input[1],l,r,n);
             pl_publish();
 #else
@@ -490,14 +490,18 @@ unsigned dly_construct(uint8_t *obj) {
        cursor<=0xc3400000u-G_BYTES)
         buffer=((void *(*)(unsigned))0x080412a5u)(G_BYTES);
 #else
-    /* Looper: ask for room for 2 bars at 60 BPM, but only if PL_RESERVE stays
-     * free afterwards for FX2 and any later consumer. Otherwise fall back to
-     * the hardware-tested Granular size (1 bar at 120 BPM fits exactly). */
+    /* Looper: the hardware-tested Granular size (768,000 bytes = 4 s of
+     * 16-bit stereo, 2 bars at 120 BPM), or more - up to 2 bars at 60 BPM -
+     * when PL_RESERVE still stays free afterwards for FX2 and any later
+     * consumer. The free figure is kept for the TOOLS page. */
     uint32_t requested=0;
-    if(cursor>=0xc0000000u && cursor<=limit && PL_BYTES+PL_RESERVE<=limit-cursor &&
-       cursor<=0xc3400000u-(PL_BYTES+PL_RESERVE)) {
-        buffer=((void *(*)(unsigned))0x080412a5u)(PL_BYTES);
-        if(buffer)requested=PL_BYTES;
+    uint32_t safe=limit<0xc3400000u?limit:0xc3400000u;
+    uint32_t avail=cursor>=0xc0000000u && cursor<=safe?safe-cursor:0u;
+    uint32_t want=avail>PL_RESERVE?(avail-PL_RESERVE)&~31u:0u;
+    if(want>PL_BYTES)want=PL_BYTES;
+    if(want>G_BYTES) {
+        buffer=((void *(*)(unsigned))0x080412a5u)(want);
+        if(buffer)requested=want;
     }
     if(!buffer && cursor>=0xc0000000u && cursor<=limit && G_BYTES<=limit-cursor &&
        cursor<=0xc3400000u-G_BYTES) {
@@ -507,7 +511,12 @@ unsigned dly_construct(uint8_t *obj) {
 #endif
     g_reset(GS,obj,buffer);
 #ifdef PHRASE_LOOPER
-    pl_reset(PL,obj,requested/(2u*sizeof(float)));
+    pl_reset(PL,obj,requested/PL_FRAME);
+    PL->free_kb=avail/1024u;
+    pl_publish();
+    __asm volatile("dsb" ::: "memory");
+    *(volatile uint32_t *)0xe000ef68u=(uint32_t)PL+32u; /* second line: free_kb */
+    __asm volatile("dsb" ::: "memory");
 #endif
     x_reset(XS,obj);
     rc_reset(RC,obj);

@@ -22,7 +22,12 @@
  *
  * Loop length uses the project tempo the M4 publishes in PL_TEMPO (BPM
  * setting 0x85, 40..250 BPM); without one, 120 BPM. A loop that does not fit
- * the buffer drops to 1 bar, then to the buffer length. */
+ * the buffer drops to 1 bar, then to the buffer length.
+ *
+ * Loop audio is stored as 16-bit stereo, scaled so +/-2.0 (overdub headroom)
+ * fills the range: 4 bytes per frame. The hardware-tested 768,000-byte
+ * Granular buffer therefore holds 192,000 frames (4 s: 2 bars at 120 BPM).
+ * The other FX1 modes keep using the same buffer as their float ring. */
 #ifndef BLUEBOX_PHRASE_LOOPER_H
 #define BLUEBOX_PHRASE_LOOPER_H
 #include <stdint.h>
@@ -35,8 +40,10 @@
 #define PL_TEMPO_MAGIC 0x504c5431u
 #define PL_FS 48000u
 #define PL_RAMP 240u              /* 5 ms declick at 48 kHz */
-#define PL_CAP_MAX 384000u        /* 2 bars at 60 BPM, stereo float */
-#define PL_BYTES (PL_CAP_MAX*2u*sizeof(float))
+#define PL_CAP_MAX 384000u        /* 2 bars at 60 BPM */
+#define PL_FRAME 4u               /* bytes per stereo 16-bit frame */
+#define PL_BYTES (PL_CAP_MAX*PL_FRAME)
+#define PL_SCALE 16384.f          /* +/-2.0 <-> +/-32767 */
 #define PL_RESERVE (4u*1024u*1024u) /* SDRAM left free for later consumers */
 #define PL_DEFAULT_BPM_X10 1200u
 
@@ -69,7 +76,8 @@ struct phrase_looper {
     uint32_t transport_seen;
     float gain,level,dub;         /* smoothed */
     uint32_t bpm_x10;             /* tempo used for the current loop */
-    uint32_t spare[2];
+    uint32_t free_kb;             /* arena free before the FX1 buffer (KiB), for TOOLS */
+    uint32_t spare;
 };
 #define PL_PRESS_REC 1u
 #define PL_PRESS_STOP 2u
@@ -120,14 +128,23 @@ static inline uint32_t pl_length(uint32_t bpm_x10,int bars,uint32_t cap,uint32_t
     return len;
 }
 
+static inline int16_t pl_q(float x) {
+    float s=x*PL_SCALE;
+    s=s>=0.f?s+.5f:s-.5f;                    /* round half away from zero */
+    if(!(s>-32767.f))s=-32767.f;             /* also maps NaN to the floor */
+    if(s>32767.f)s=32767.f;
+    return (int16_t)s;
+}
+static inline float pl_f(int16_t q) {return (float)q*(1.f/PL_SCALE);}
 /* In-place declick at both ends of a freshly recorded loop. */
-static inline void pl_seal(float *buffer,uint32_t len) {
+static inline void pl_seal(int16_t *buffer,uint32_t len) {
     uint32_t r=PL_RAMP;
     if(r>len/4u)r=len/4u;
     for(uint32_t i=0;i<r;i++) {
         float g=(float)i*(1.f/(float)PL_RAMP);
-        float *a=buffer+2u*i,*b=buffer+2u*(len-1u-i);
-        a[0]*=g;a[1]*=g;b[0]*=g;b[1]*=g;
+        int16_t *a=buffer+2u*i,*b=buffer+2u*(len-1u-i);
+        a[0]=pl_q(pl_f(a[0])*g);a[1]=pl_q(pl_f(a[1])*g);
+        b[0]=pl_q(pl_f(b[0])*g);b[1]=pl_q(pl_f(b[1])*g);
     }
 }
 
@@ -138,7 +155,7 @@ static inline void pl_start_capture(struct phrase_looper *p,const struct granula
     p->state=p->len>=PL_RAMP*4u?PL_REC:PL_EMPTY;
 }
 /* Close a take early: keep it as the loop if it is long enough. */
-static inline void pl_close(struct phrase_looper *p,float *buffer,uint32_t next) {
+static inline void pl_close(struct phrase_looper *p,int16_t *buffer,uint32_t next) {
     if(p->pos>=PL_RAMP*4u) {
         p->len=p->pos;p->pos=0;p->state=next;p->seq++;
         pl_seal(buffer,p->len);
@@ -152,7 +169,7 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
     if(press&PL_PRESS_STOP) {
         switch(p->state) {
         case PL_ARMED:p->state=PL_EMPTY;break;
-        case PL_REC:pl_close(p,g->buffer,PL_STOP);break;
+        case PL_REC:pl_close(p,(int16_t *)g->buffer,PL_STOP);break;
         case PL_PLAY:case PL_DUB:p->state=PL_STOP;break;
         case PL_STOP:if(p->len){p->state=PL_PLAY;p->pos=0;}break;
         default:break;
@@ -166,7 +183,7 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
             else pl_start_capture(p,g,bpm_x10);
             break;
         case PL_ARMED:p->state=PL_EMPTY;break;
-        case PL_REC:pl_close(p,g->buffer,PL_PLAY);break;
+        case PL_REC:pl_close(p,(int16_t *)g->buffer,PL_PLAY);break;
         case PL_PLAY:p->state=PL_DUB;break;
         case PL_DUB:p->state=PL_PLAY;break;
         case PL_STOP:if(p->len){p->state=PL_PLAY;p->pos=0;}break;
@@ -183,7 +200,7 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
  * and the fade reaches zero, the shared ring is handed back empty. */
 static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
                              const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n) {
-    float *buffer=g->buffer;
+    int16_t *buffer=(int16_t *)g->buffer;
     if(!buffer)return;
     pl_controls(p,g,bpm_x10,playing);
     float target=g->mode?1.f:0.f,fade=g->fade;
@@ -196,19 +213,18 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
         level+=dl;dub+=dd;
         float l=0.f,r=0.f;
         if(state==PL_REC) {
-            buffer[2u*pos]=g_limit(in_l[i]);
-            buffer[2u*pos+1u]=g_limit(in_r[i]);
+            buffer[2u*pos]=pl_q(in_l[i]);
+            buffer[2u*pos+1u]=pl_q(in_r[i]);
             if(++pos>=len) {
                 pl_seal(buffer,len);
                 pos=0;state=PL_PLAY;p->seq++;
             }
         } else if((state==PL_PLAY || state==PL_DUB || state==PL_STOP) && len) {
-            float *s=buffer+2u*pos;
-            l=s[0];r=s[1];
+            int16_t *s=buffer+2u*pos;
+            l=pl_f(s[0]);r=pl_f(s[1]);
             if(state==PL_DUB && dub>0.f) {
-                float a=l+in_l[i]*dub,b=r+in_r[i]*dub;
-                s[0]=a>2.f?2.f:a<-2.f?-2.f:a;
-                s[1]=b>2.f?2.f:b<-2.f?-2.f:b;
+                s[0]=pl_q(l+in_l[i]*dub);       /* pl_q saturates at +/-2.0 */
+                s[1]=pl_q(r+in_r[i]*dub);
             }
             if(++pos>=len)pos=0;
         }

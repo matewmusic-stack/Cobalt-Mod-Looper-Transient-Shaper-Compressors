@@ -464,7 +464,29 @@ float dly_knob_fraction(uint8_t *w) {
 }
 /* Tools header has three pre-existing fields: storage at +174, empty
  * middle at +d4, official version at +34. Reuse the empty field. */
+#ifdef PHRASE_LOOPER
+/* Looper build: the middle TOOLS field shows the longest loop and the SDRAM
+ * that was free for it at boot, e.g. "Cblt L4.0s F3.1M". */
+static char *lp_num(char *q,uint32_t tenths) {
+    if(tenths>999u)tenths=999u;
+    if(tenths>=100u)*q++=(char)('0'+tenths/100u);
+    *q++=(char)('0'+tenths/10u%10u);*q++='.';*q++=(char)('0'+tenths%10u);
+    return q;
+}
+#endif
 void dly_tools_version(void *label,const char *stock) {
     ((void (*)(void *,const char *))0x0813820du)(label,stock);
+#ifdef PHRASE_LOOPER
+    backup_enable();
+    const volatile struct phrase_looper *s=LP_STATE;
+    if(s->magic==PL_MAGIC) {
+        char t[24],*q=t;const char *w="Cblt L";
+        while(*w)*q++=*w++;
+        q=lp_num(q,s->cap/4800u);*q++='s';*q++=' ';*q++='F';
+        q=lp_num(q,s->free_kb*10u/1024u);*q++='M';*q=0;
+        ((void (*)(void *,const char *))0x0813820du)((uint8_t *)label+0xa0,t);
+        return;
+    }
+#endif
     ((void (*)(void *,const char *))0x0813820du)((uint8_t *)label+0xa0,"Cblt 1.2");
 }

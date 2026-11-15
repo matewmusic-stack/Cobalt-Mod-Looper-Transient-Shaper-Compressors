@@ -23,7 +23,9 @@ GS=0x38800000;PL=0x38800ea0;TEMPO=0x38800ee0;SESSION=0x300173d0
 MODE,LEVEL,CLEAR,BARS,DUB,SYNC,REC,STOP=0x1a0,0x1a1,0x1a2,0x1a3,0x1a4,0x1a5,0x1a6,0x1ba
 MUTE,FX1SEND=0x160,0xda
 EMPTY,ARMED,RECORDING,PLAYING,STOPPED,DUBBING=range(6)
-PL_MAGIC=0x504c4f32;PL_CAP_MAX=384000;G_CAP=96000;PL_BYTES=PL_CAP_MAX*8;G_BYTES=G_CAP*8;RESERVE=4<<20
+PL_MAGIC=0x504c4f32;PL_CAP_MAX=384000;PL_BYTES=PL_CAP_MAX*4;G_BYTES=768000;G_FRAMES=G_BYTES//4;RESERVE=4<<20
+# Loop audio is 16-bit stereo, +/-2.0 full scale: frame k is 4 bytes at ptr+4k.
+def q16(u,a,n):return struct.unpack('<%dh'%(2*n),u.mem_read(a,4*n))
 S4=M['symbols']['4'];C4=M['symbols']['cue4'];PC=M['symbols']['pcm4']
 LOOPER_ON=INITIAL+[(MODE,1),(LEVEL,1000),(CLEAR,0),(BARS,1),(DUB,1000),(SYNC,0),(REC,0),(STOP,0)]
 def press(pid):return [(pid,1),(pid,0)]   # UI press, then the M4 reset, in one block
@@ -47,13 +49,13 @@ def lsetup(limit=0xc2000000,nan=True):
  w32(u,DOBJ+8,NEXT);w32(u,NEXT,VT);w32(u,VT+12,NEXT_FN|1)
  stub(u,NEXT_FN,lambda u:u.reg_write(UC_ARM_REG_R0,7))
  ptr=u32(u,GS+8)
- if nan and ptr:u.mem_write(ptr,struct.pack('<f',float('nan'))*(pl(u)['cap']*2))
+ if nan and ptr:u.mem_write(ptr,b'\x5a\x5a'*(pl(u)['cap']*2))   # sentinel: never a recorded value here
  return u,allocs
 
 def pl(u):
- a=struct.unpack('<8I',u.mem_read(PL,32));b=struct.unpack('<3bBIfffI',u.mem_read(PL+32,24))
+ a=struct.unpack('<8I',u.mem_read(PL,32));b=struct.unpack('<3bBIfffII',u.mem_read(PL+32,28))
  d=dict(zip(['magic','owner','cap','state','len','pos','bars','seq'],a))
- d.update(last=b[:3],presses=b[3],transport=b[4],gain=b[5],level=b[6],dub=b[7],bpm_x10=b[8]);return d
+ d.update(last=b[:3],presses=b[3],transport=b[4],gain=b[5],level=b[6],dub=b[7],bpm_x10=b[8],free_kb=b[9]);return d
 def tempo(u,raw_bpm,playing,muted=None):
  m=u32(u,TEMPO+24) if muted is None else muted
  u.mem_write(TEMPO,struct.pack('<IiIIIIII',0x504c5431,raw_bpm,playing,0,0,0,m,0))
@@ -103,10 +105,14 @@ i=sizes.index(PL_BYTES)
 check(len(sizes)>i+1,'FX2 Shoegaze still allocates after the looper buffer')
 cursor=[a for a,s in allocs if s==PL_BYTES][0]
 u2,a2=lsetup(limit=cursor+PL_BYTES+RESERVE-1)
-check(G_BYTES in [s for a,s in a2] and PL_BYTES not in [s for a,s in a2] and pl(u2)['cap']==G_CAP,'without 4 MB spare the looper falls back to the tested %d-byte buffer'%G_BYTES)
+check(PL_BYTES-32 in [s for a,s in a2] and pl(u2)['cap']==(PL_BYTES-32)//4,'less room: the looper takes what fits while 4 MB stay free (%d bytes)'%(PL_BYTES-32))
+u2,a2=lsetup(limit=cursor+G_BYTES+RESERVE)
+check(G_BYTES in [s for a,s in a2] and pl(u2)['cap']==G_FRAMES and pl(u2)['free_kb']==(G_BYTES+RESERVE)//1024,'no room above the reserve: the tested %d-byte buffer, 4 s of 16-bit stereo'%G_BYTES)
 tempo(u2,120,0,0);K[0]=0
 step(u2,LOOPER_ON+[(BARS,2)]);run(u2,10);step(u2,press(REC))
-check(pl(u2)['len']==96000 and pl(u2)['bars']==1,'fallback buffer: 2 bars at 120 BPM drops to 1 bar (96000 frames)')
+check(pl(u2)['len']==192000 and pl(u2)['bars']==2,'tested buffer: 2 bars at 120 BPM now fit (192000 frames)')
+step(u2,press(CLEAR));tempo(u2,100,0);step(u2,press(REC))
+check(pl(u2)['len']==115200 and pl(u2)['bars']==1,'tested buffer at 100 BPM: drops to 1 bar')
 u3,a3=lsetup(limit=cursor+PL_BYTES+RESERVE)
 check(PL_BYTES in [s for a,s in a3],'exactly buffer + 4 MB free still takes the full looper buffer')
 u4,a4=lsetup(limit=cursor+G_BYTES-1)
@@ -122,6 +128,14 @@ def on_write(u,access,address,size,value,_):
  off=address-ptr;watch['hi']=max(watch['hi'],off+size)
  if watch['lo'] is None or off<watch['lo']:watch['lo']=off
 u.hook_add(UC_HOOK_MEM_WRITE,on_write,begin=ptr,end=ptr+PL_BYTES+0x40000-1)
+bad_reads=[]
+def on_read(u,access,address,size,value,_):
+ # Recorded frames: the loop length (set when a take starts or closes) or
+ # the record position, whichever is larger; the end-of-take fade reads
+ # back the last frames of the take before the state moves on.
+ n=max(u32(u,PL+16),u32(u,PL+20))
+ if address-ptr>=n*4:bad_reads.append((address-ptr,u32(u,PL+12),u32(u,PL+16),u32(u,PL+20)))
+rh=u.hook_add(UC_HOOK_MEM_READ,on_read,begin=ptr,end=ptr+PL_BYTES-1)
 step(u,[e if e!=(REC,0) else (REC,1) for e in LOOPER_ON])   # a project saved with REC=1: its only REC value latches
 check(pl(u)['state']==EMPTY and pl(u)['last']==(1,0,0),'values at load latch: a saved REC=1 does not start a take')
 step(u,[(REC,0)]);run(u,10)
@@ -133,16 +147,18 @@ check(all(x==0. for x in o),'FX1 return is silent while recording: the source is
 check(title(u)=='REC 1/1','title shows REC 1/1')
 o=run(u,1499)
 check(pl(u)['state']==PLAYING and pl(u)['pos']==0 and title(u)=='PLAY','capture turns into playback after exactly 1500 blocks; title PLAY')
-mism=0
+mism=0;far=0
 for j in range(1500):
- o=step(u);l,r=inp(start+j)
+ stored=q16(u,ptr+j*32*4,32);o=step(u);l,r=inp(start+j)
  for i in range(32):
   t=j*32+i
-  if 240<=t<48000-240 and (o[i]!=f32r(l[i]) or o[32+i]!=f32r(r[i])):mism+=1
-check(mism==0,'playback reproduces the take sample for sample away from the 5 ms edge ramps (%d mismatches)'%mism)
-check(watch['lo']==0 and watch['hi']==48000*8,'recording wrote exactly the loop region')
+  if t>=240 and (o[i]!=f32r(stored[2*i]/16384) or o[32+i]!=f32r(stored[2*i+1]/16384)):mism+=1   # after the 5 ms play fade-in
+  if 240<=t<48000-240 and (abs(o[i]-l[i])>.5/16384+1e-7 or abs(o[32+i]-r[i])>.5/16384+1e-7):far+=1
+check(mism==0,'after its 5 ms fade-in, playback outputs the stored loop sample for sample (%d mismatches)'%mism)
+check(far==0,'the stored loop is the take within half a 16-bit step, away from the 5 ms edge ramps (%d outside)'%far)
+check(watch['lo']==0 and watch['hi']==48000*4,'recording wrote exactly the loop region (16-bit stereo)')
 step(u,[(LEVEL,500)]);pos=pl(u)['pos'];o=step(u)
-rec=struct.unpack('<64f',u.mem_read(ptr+pos*8,256))[0::2]
+rec=[v/16384 for v in q16(u,ptr+pos*4,32)[0::2]]
 check(max(abs(o[i]-.5*rec[i]) for i in range(32))<1e-6,'Level 50% plays the loop at half volume, with no dry input on the FX1 return')
 step(u,[(LEVEL,1000)])
 
@@ -155,9 +171,9 @@ put(u,0,MUTE,0);check(lp_main(u)==[],'a track you unmute during playback stays u
 step(u,press(REC))
 check(pl(u)['state']==DUBBING and title(u)=='DUB','REC while playing starts overdub; title DUB')
 check(lp_main(u)==[(2,MUTE,0)] and u32(u,TEMPO+24)==0,'overdub unmutes the sources the looper muted, so you hear what you play')
-before=bytes(u.mem_read(ptr,48000*8));run(u,1500)
-after=struct.unpack('<96000f',u.mem_read(ptr,48000*8))
-check(bytes(u.mem_read(ptr,48000*8))!=before and max(abs(x) for x in after)<=2.,'overdub layers input into the loop, bounded to +/-2.0')
+before=bytes(u.mem_read(ptr,48000*4));run(u,1500)
+after=q16(u,ptr,48000)
+check(bytes(u.mem_read(ptr,48000*4))!=before and max(abs(x) for x in after)<=32767 and min(after)>=-32767,'overdub layers input into the loop, saturating at +/-2.0 (no wrap-around)')
 step(u,press(REC))
 check(pl(u)['state']==PLAYING and sorted(lp_main(u))==[(0,MUTE,1),(2,MUTE,1)],'REC again ends overdub and the sources are muted again')
 put(u,0x14,REC,1)
@@ -169,7 +185,7 @@ check(pl(u)['state']==STOPPED and title(u)=='STOP' and sorted(lp_main(u))==[(0,M
 o=run(u,10)
 check(all(x==0. for x in o) and pl(u)['pos']==0,'stopped loop is silent and rewound')
 step(u,press(STOP));o=run(u,20)
-loop20=struct.unpack('<64f',u.mem_read(ptr+20*32*8,256))[0::2]   # the (overdubbed) loop at block 20
+loop20=tuple(f32r(v/16384) for v in q16(u,ptr+20*32*4,32)[0::2])   # the (overdubbed) loop at block 20
 check(pl(u)['state']==PLAYING and o[:32]==loop20,'STOP again plays from the start of the loop')
 lp_main(u)
 check(lp_main(u,loading=1)==[] and u32(u,TEMPO+24)==0,'a project load forgets the mute record without unmuting anything')
@@ -221,6 +237,14 @@ print('INFO loop lengths',lengths)
 check(lengths[(120,2)]==lengths[(1200,2)]==(192000,2) and lengths[(60,2)]==(384000,2),'2 bars at 120 BPM = 4 s (plain or tenths); 2 bars at 60 BPM fill the buffer')
 check(lengths[(40,2)]==(288000,1) and lengths[(250,1)]==(46080,1) and lengths[(0,1)]==(96000,1),'40 BPM drops to 1 bar; 250 BPM 1 bar = 0.96 s; no tempo = 120 BPM')
 check(watch['hi']<=PL_BYTES,'no write ever went past the looper buffer (FX2 memory untouched)')
+check(not bad_reads,'the looper never read loop memory outside the recorded frames %s'%bad_reads[:4])
+u.hook_del(rh)
+# TOOLS middle field: longest loop and free SDRAM at boot
+texts=[];h=stub(u,0x813820c,lambda u:texts.append(bytes(u.mem_read(u.reg_read(UC_ARM_REG_R1),24)).split(b'\0')[0].decode()))
+call(u,S4['dly_tools_version'],0x24050000,0x24050200);u.hook_del(h)
+fr=pl(u)['free_kb']*10//1024
+want='Cblt L8.0s F%d.%dM'%(fr//10,fr%10)
+check(texts[-1]==want,'TOOLS shows the longest loop and the free SDRAM: %s'%texts[-1])
 
 # ======================================================== CPU (relative)
 step(u,press(CLEAR));tempo(u,240,1)
@@ -233,8 +257,15 @@ run(u,1500);play=cost()
 step(u,press(REC));dub=cost()
 step(u,[(MODE,5)]);run(u,10);delay=cost()
 u.hook_del(h)
-print('INFO emulated instructions per 32-frame block: record %d, play %d, overdub %d; plain Delay %d'%(rec,play,dub,delay))
-check(max(rec,play,dub)<delay,'looper blocks execute fewer instructions than the stock Delay they replace (relative, not hardware cycles)')
+# Reference: the hardware-tested Granular this mode replaces, on the Cobalt-only image.
+g,_,_=dsetup(H.p.transform(stock));gc=[0]
+for n in range(400):dblock(g,signal(.5,n,431),evs=INITIAL+[(MODE,1),(0x1a3,4),(0x1a4,500),(0x4a,7)] if n==0 else [])
+hg=g.hook_add(UC_HOOK_CODE,lambda u,a,n,d:gc.__setitem__(0,gc[0]+1),begin=0x08000000,end=0x081fffff)
+gran=[]
+for n in range(400,410):gc[0]=0;dblock(g,signal(.5,n,431));gran.append(gc[0])
+g.hook_del(hg)
+print('INFO emulated instructions per 32-frame block: record %d, play %d, overdub %d; plain Delay %d; Granular (tested) %d-%d'%(rec,play,dub,delay,min(gran),max(gran)))
+check(max(rec,play,dub)<min(gran),'every looper block executes fewer instructions than the hardware-tested Granular it replaces (relative, not hardware cycles)')
 
 # ==================================================== leaving the mode
 check(pl(u)['state']==EMPTY and pl(u)['last']==(-1,-1,-1),'plain Delay drops the loop and the button history at once')
