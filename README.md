@@ -396,7 +396,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 The looper is built as a separate firmware variant. The default build is unchanged: it still reproduces the released Cobalt 1.2.0 image (SHA-256 `c28981e5…`), and `patch_bluebox.html` and `docs/index.html` stay Cobalt-only.
 
-**Looper web patcher:** open `patch_looper.html` (also `docs/looper/index.html`) in a browser and drop in the original desktop 1.5.2 `BLUEBOX.BIN`. As with the Cobalt patcher, everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN` (default theme SHA-256 `dc79805d…`). **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included.
+**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)**, or open `patch_looper.html` (also `docs/looper/index.html`) in a browser, and drop in the original desktop 1.5.2 `BLUEBOX.BIN`. As with the Cobalt patcher, everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN` (default theme SHA-256 `dc79805d…`). **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included.
 
 ```sh
 # Arm GNU Toolchain 13.2.Rel1 on PATH, as for the normal build
