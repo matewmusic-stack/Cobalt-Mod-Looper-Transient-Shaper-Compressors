@@ -1,0 +1,43 @@
+@@ -434,11 +484,33 @@
+     uint32_t cursor=*(volatile uint32_t *)0x24000004u;
+     uint32_t limit=*(volatile uint32_t *)0x24000000u;
+     float *buffer=0;
++#ifndef PHRASE_LOOPER
+     if(cursor>=0xc0000000u && cursor<=limit && G_BYTES<=limit-cursor &&
+        cursor<=0xc3400000u-G_BYTES)
+         buffer=((void *(*)(unsigned))0x080412a5u)(G_BYTES);
++#define FX1_REQUESTED (buffer?G_BYTES:0u)
++#else
++    uint32_t requested=0;
++#define FX1_REQUESTED requested
++    /* Looper: ask for room for 2 bars at 60 BPM, but only if PL_RESERVE stays
++     * free afterwards for FX2 and any later consumer. Otherwise fall back to
++     * the hardware-tested Granular size (1 bar at 120 BPM fits exactly). */
++    if(cursor>=0xc0000000u && cursor<=limit && PL_BYTES+PL_RESERVE<=limit-cursor &&
++       cursor<=0xc3400000u-(PL_BYTES+PL_RESERVE)) {
++        buffer=((void *(*)(unsigned))0x080412a5u)(PL_BYTES);
++        if(buffer)requested=PL_BYTES;
++    }
++    if(!buffer && cursor>=0xc0000000u && cursor<=limit && G_BYTES<=limit-cursor &&
++       cursor<=0xc3400000u-G_BYTES) {
++        buffer=((void *(*)(unsigned))0x080412a5u)(G_BYTES);
++        if(buffer)requested=G_BYTES;
++    }
++#endif
+     uint32_t after_fx1=*(volatile uint32_t *)0x24000004u;
+     g_reset(GS,obj,buffer);
++#ifdef PHRASE_LOOPER
++    pl_reset(PL,obj,requested/(2u*sizeof(float)));
++#endif
+     x_reset(XS,obj);
+     rc_reset(RC,obj);
+     sg_allocate();
+@@ -450,7 +522,7 @@
+     r->magic=0;
+     r->cursor_before_fx1=cursor;
+     r->limit=limit;
+-    r->fx1_requested=buffer?G_BYTES:0u;
++    r->fx1_requested=FX1_REQUESTED;
+     r->cursor_after_fx1=after_fx1;
+     r->fx2_requested=SL->state?SG_ALLOC:0u;
+     r->cursor_after_fx2=after_fx2;

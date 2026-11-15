@@ -1,0 +1,14 @@
+@@ -1,6 +1,13 @@
+ /* Native desktop FX parameter lists and compact layout. */
+ #include <stdint.h>
+ #include "fx1_alloc_report.h"
++#ifdef PHRASE_LOOPER
++#define G_DENSITY_MAX 2     /* Looper Bars: 1..2 */
++#define G_TITLE "Looper"
++#else
++#define G_DENSITY_MAX 4
++#define G_TITLE "Granulr"
++#endif
+ typedef void (*vfn_rect)(void *,int *);
+ typedef void (*populate_fn)(uint8_t *,short *);
+ typedef void (*layout_fn)(uint8_t *);
