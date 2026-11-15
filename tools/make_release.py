@@ -208,20 +208,11 @@ add('Tools MIDI row has no value',0x0814ba3c,struct.pack('<I',0x08131211),struct
 add('Row list tap on the MIDI row opens the MIDI page',0x0814cac4,struct.pack('<I',0x0813d89d),struct.pack('<I',PC['pc_list_event']|1))
 add('Scenes project reader',0x08121416,branch(0x08121416,0x081079c0),branch(0x08121416,PC['sc_read']))
 manifest=dict(name='Cobalt for 1010music bluebox desktop',version='1.2.0',firmware='desktop 1.5.2',size=len(stock),stock_sha256=STOCK_HASH,patched_sha256=hashlib.sha256(patched).hexdigest(),patches=patches,symbols={str(c):symbols(c) for c in [7,4]})
-# LOOPER=1 (see build.sh): write the Phrase Looper firmware image and its
-# manifest under build/ only. The Cobalt-only patcher, docs and themes are
-# left exactly as they are; the looper image uses the default theme.
-if os.environ.get('LOOPER')=='1':
- clut=symbols(4)['theme_knob_palette']-0x08040000
- for slot in range(34):
-  if patched[clut+slot*4:clut+slot*4+4]!=patched[0x10d230+slot*4:0x10d234+slot*4]:raise ValueError('conversion palette mismatch '+str(slot))
- manifest.update(name=manifest['name']+' + FX1 Phrase Looper',variant='phrase-looper',symbols=dict(manifest['symbols'],gr7=gr_symbols,delay7=ds,gate7=ngs,cue7=cues,cue4=cue4,pcm4=PC))
- (ROOT/'build'/'BLUEBOX-looper.BIN').write_bytes(bytes(patched))
- (ROOT/'build'/'looper_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
- print('Built Cobalt v1.2.0 + FX1 Phrase Looper: build/BLUEBOX-looper.BIN')
- print('SHA256:',manifest['patched_sha256'])
- print('Added code bytes:',sum(len(base64.b64decode(p['new'])) for p in patches if p['name'].endswith('code')))
- raise SystemExit(0)
+# LOOPER=1 (see build.sh): the Phrase Looper variant. It goes through the same
+# theme and manifest steps, then writes its own patchers (see the end); the
+# Cobalt-only patcher, manifest and docs/index.html are left untouched.
+LOOPER=os.environ.get('LOOPER')=='1'
+if LOOPER:manifest.update(name=manifest['name']+' + FX1 Phrase Looper',variant='phrase-looper')
 manifest['symbols']['gate7']=ngs
 manifest['symbols']['pcm4']=PC
 fields=[
@@ -330,9 +321,10 @@ manifest['symbols']['cue7']=cues
 manifest['symbols']['cue4']=cue4
 manifest['meters_only_sha256']='76fb996aa76ecfa0d8234aca1210bf360e234a49653b8fe213c97f131deaa29f'
 manifest['cpu_only_sha256']='bc86a68620be4916c64220acb51bd04a6b2bb5c2d53517614588f58cc9b0fb9a'
-(ROOT/'patch_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+OUT=dict(manifest='patch_manifest_looper.json',py='patch_looper.py',html='patch_looper.html',docs=ROOT/'docs'/'looper') if LOOPER else dict(manifest='patch_manifest.json',py='patch_bluebox.py',html='patch_bluebox.html',docs=ROOT/'docs')
+(ROOT/OUT['manifest']).write_text(json.dumps(manifest,indent=2)+'\n')
 template=(ROOT/'tools'/'patcher_template.py').read_text()
-(ROOT/'patch_bluebox.py').write_text(template.replace('__MANIFEST_JSON__',repr(json.dumps(manifest,separators=(',',':')))))
+(ROOT/OUT['py']).write_text(template.replace('__MANIFEST_JSON__',repr(json.dumps(manifest,separators=(',',':')))))
 html=(ROOT/'tools'/'patcher_template.html').read_text().replace('__VERSION__',manifest['version'])
 CORE_HINTS=dict(accent='Selected track headers, control-group frame, selected list row, scope channel 2',background='Menus and empty screen areas',text='Track numbers, clock, idle button labels, knob labels, list and value text',
  button_idle='Track headers, title bars, idle buttons, list rows, keys, muted track meters',button_active='Lit tabs and toggles, level meters, selected file row',button_pressed='Button while pressed',button_border='Native outline colour (not drawn in the preview)',
@@ -343,10 +335,20 @@ def row(f):
   '<span class="meta"><span class="name">'+name+'</span><span class="hint">'+escape(hint)+'</span></span>'
   '<input id="'+f['key']+'Hex" class="hex" type="text" value="'+f['default']+'" maxlength="7" spellcheck="false" aria-label="'+name+' hex colour"></div>')
 field_html='<div class="swatches">'+''.join(row(f) for f in fields)+'</div>'
-(ROOT/'patch_bluebox.html').write_text(html.replace('__THEME_FIELDS_HTML__',field_html).replace('__MANIFEST_JSON__',json.dumps(manifest,separators=(',',':'))))
-# GitHub Pages: publish docs/ (index.html is the same self-contained page).
-(ROOT/'docs').mkdir(exist_ok=True)
-(ROOT/'docs'/'index.html').write_text((ROOT/'patch_bluebox.html').read_text())
+page=html.replace('__THEME_FIELDS_HTML__',field_html).replace('__MANIFEST_JSON__',json.dumps(manifest,separators=(',',':')))
+if LOOPER:
+ sys.path.insert(0,str(ROOT/'tools'));import looper_page
+ page=looper_page.adapt(page,manifest)
+(ROOT/OUT['html']).write_text(page)
+# GitHub Pages: publish docs/ (each index.html is the same self-contained page).
+OUT['docs'].mkdir(parents=True,exist_ok=True)
+(OUT['docs']/'index.html').write_text(page)
 (ROOT/'docs'/'.nojekyll').write_text('')
-print('Built Cobalt v1.2.0 patcher. Expected output SHA256:',manifest['patched_sha256'])
+if LOOPER:
+ # The looper image itself stays local (build/ is never committed).
+ (ROOT/'build'/'BLUEBOX-looper.BIN').write_bytes(bytes(patched))
+ (ROOT/'build'/'looper_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+ print('Built Cobalt v1.2.0 + FX1 Phrase Looper: build/BLUEBOX-looper.BIN, patch_looper.html, docs/looper/index.html')
+ print('SHA256:',manifest['patched_sha256'])
+else:print('Built Cobalt v1.2.0 patcher. Expected output SHA256:',manifest['patched_sha256'])
 print('Added code bytes:',sum(len(base64.b64decode(p['new'])) for p in patches if p['name'].endswith('code')))
