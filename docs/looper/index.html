@@ -194,7 +194,7 @@ const DRAW={
   button(P,148,193,44,47,'FREEZ','button_idle',8);P.rect(193,146,82,94,WELL);},
  xy(P){base(P);strip(P,20,128,{master:.12,masterTo:239,tracks:[{},{},{level:.05}]});P.rect(0,129,137,111,WELL,'#3a3a3a',.8);P.rect(138,129,137,111,WELL,'#3a3a3a',.8);
   P.text(4,139,'DELAY','text',8,'start');P.text(142,139,'REVERB','text',8,'start');P.circle(12,141,3.5,'knob');cross(P,68,186,GREY);cross(P,206,186,'knob');P.circle(206,186,3,'knob');},
- fxmenu(P){base(P);button(P,0,22,160,34,'FX1','button_idle',14);button(P,161,22,159,34,'Delay','button_idle',14);listRows(P,['Delay','Warp delay','Granular','Tape','Ducked','Reverse'],0,{y:58,h:28});},
+ fxmenu(P){base(P);button(P,0,22,160,34,'FX1','button_idle',14);button(P,161,22,159,34,'Delay','button_idle',14);listRows(P,['Delay','Warp delay','Phrase Looper','Tape','Ducked','Reverse'],0,{y:58,h:28});},
  edit(P){base(P);P.rect(0,20,287,100,BLACK,'#3a3a3a',.6);for(let x=12;x<287;x+=14.2)P.line(x,21,x,119,GREY,.6);
   for(let i=0;i<6;i++)P.rect(2,23+i*6,6,5,'#ffff00');[24,33,42].forEach(y=>P.rect(9,y,52,3,'accent'));cell(P,288,20,32,220,'M',{level:.12});
   ['PLAY FROM','PUNCH IN','PUNCH OUT'].forEach((l,i)=>{const x=i*96;P.rect(x,121,95,18,'button_idle');P.text(x+48,134,l,'text',8);button(P,x,140,95,49,'1:1','button_idle',16);button(P,x,190,95,50,'Enable','button_idle',15);});},
