@@ -23,12 +23,13 @@ void sat_defs(void *table,unsigned id,unsigned type,const char *label,int min,in
     static const char *const modes[]={"Warp delay","Phrase Looper","Tape","Ducked","Reverse","Delay"};
     ((void (*)(void *,unsigned,const char *,const char *const *,unsigned,const char *))0x08134c39u)
         (table,G_MODE,"Mode:",modes,6,"dlymode");
-    STOCK_DEF(table,G_POS,8,"Dry/Wet:",0,1000,"grnposition");
-    STOCK_DEF(table,G_SIZE,4,"Clear:",0,1,"grnsize");
+    STOCK_DEF(table,G_POS,8,"Level:",0,1000,"grnposition");
+    STOCK_DEF(table,G_SIZE,4,"Clear:",0,1,"grnsize");      /* button */
     STOCK_DEF(table,G_DENSITY,1,"Bars:",1,2,"grndensity");
-    STOCK_DEF(table,G_JITTER,8,"Overdub:",0,1000,"grnjitter");
+    STOCK_DEF(table,G_JITTER,8,"Dub:",0,1000,"grnjitter");
     STOCK_DEF(table,G_FREEZE,4,"Sync:",0,1,"grnfreeze");
-    STOCK_DEF(table,G_REVERSE,4,"Play:",0,1,"grnreverse");
+    STOCK_DEF(table,G_REVERSE,4,"Rec:",0,1,"grnreverse");   /* button */
+    STOCK_DEF(table,0x1ba,4,"Stop:",0,1,"lpstop");         /* button, empty stock slot */
 #else
     static const char *const modes[]={"Warp delay","Granular","Tape","Ducked","Reverse","Delay"};
     ((void (*)(void *,unsigned,const char *,const char *const *,unsigned,const char *))0x08134c39u)
@@ -83,11 +84,14 @@ void dly_defaults(void *set) {
         {0x33,400},{0x39,400},{0xe,120},{0xcb,1000},{0x4a,0},{0x3a,0},{0x3d,0},
         {0xca,1},{0x35,1},{0x36,1},{0x4b,0},{0x37,0},{0x34,6},
 #ifdef PHRASE_LOOPER
-        {G_MODE,5},{G_POS,1000},{G_SIZE,0},{G_DENSITY,2},{G_JITTER,0},{G_FREEZE,0},{G_REVERSE,0},
+        {G_MODE,5},{G_POS,1000},{G_SIZE,0},{G_DENSITY,2},{G_JITTER,1000},{G_FREEZE,0},{G_REVERSE,0},
 #else
         {G_MODE,5},{G_POS,250},{G_SIZE,80},{G_DENSITY,4},{G_JITTER,0},{G_FREEZE,0},{G_REVERSE,0},
 #endif
         {T_DRIVE,350},{T_DUCK,700},{T_RELEASE,300},{T_SEGMENT,400},{T_TONE,650},{T_HICUT,6000},{T_WILD,0},{T_LOCUT,20}
+#ifdef PHRASE_LOOPER
+        ,{0x1ba,0} /* Looper Stop button */
+#endif
     };
     for(unsigned i=0;i<sizeof(defaults)/sizeof(defaults[0]);i++)
         STOCK_ADD(set,defaults[i].id,defaults[i].value);

@@ -3,7 +3,7 @@ Widget setRect/display child callbacks are emulated; native compact layout runs.
 """
 from firmware_harness import *
 import firmware_harness as H
-PARAMS=[(0x33,400),(0x39,400),(0xe,120),(0xcb,1000),(0x4a,0),(0x3a,0),(0x3d,0),(0xca,1),(0x35,1),(0x36,1),(0x4b,0),(0x37,0),(0x34,6),(0x1a0,5),*GDEF,(0x1a4,0),(0x1a5,0),(0x1a6,0),(0x1a7,350),(0x1a8,700),(0x1a9,300),(0x1aa,400),(0x1ab,650),(0x1ac,6000),(0x1ad,0),(0x1b9,20)]
+PARAMS=[(0x33,400),(0x39,400),(0xe,120),(0xcb,1000),(0x4a,0),(0x3a,0),(0x3d,0),(0xca,1),(0x35,1),(0x36,1),(0x4b,0),(0x37,0),(0x34,6),(0x1a0,5),*GDEF,(0x1a4,JDEF),(0x1a5,0),(0x1a6,0),(0x1a7,350),(0x1a8,700),(0x1a9,300),(0x1aa,400),(0x1ab,650),(0x1ac,6000),(0x1ad,0),(0x1b9,20),*XDEF]
 def defs(image):
  u=machine(image);stub(u,0x8103128,lambda u:u.reg_write(UC_ARM_REG_R0,0xc0010000));call(u,0x8134cb8,0);return u
 old=defs(stock);u=defs(patched)
@@ -91,6 +91,6 @@ check(all(call(u,0x8120234,SET,id)==0 for id in values),'old project without del
 FRESH=0x24022000
 call(u,0x81202b8,FRESH,0x24010000);w32(u,FRESH,VTY)
 call(u,0x8120c3c,XML,FRESH)
-check(all(call(u,0x8120234,FRESH,id)==v for id,v in [(0x1a0,5),*GDEF,(0x1a4,0),(0x1a5,0),(0x1a6,0),(0x1a7,350),(0x1a8,700),(0x1a9,300),(0x1aa,400),(0x1ab,650),(0x1ac,6000),(0x1ad,0)]),'old project on a fresh delay retains plain Delay, 80ms, four-grain and unarmed Freeze defaults')
+check(all(call(u,0x8120234,FRESH,id)==v for id,v in [(0x1a0,5),*GDEF,(0x1a4,JDEF),(0x1a5,0),(0x1a6,0),(0x1a7,350),(0x1a8,700),(0x1a9,300),(0x1aa,400),(0x1ab,650),(0x1ac,6000),(0x1ad,0)]),'old project on a fresh delay retains plain Delay, 80ms, four-grain and unarmed Freeze defaults')
 
 print(str(H.checks)+' desktop delay UI checks passed; complete native populate/display interaction remains a hardware test.')

@@ -22,8 +22,8 @@ void x_reverse_input_o2(struct delay_types *x,struct granular *g,float *l,float 
 }
 #ifdef PHRASE_LOOPER
 #include "phrase_looper.h"
-unsigned pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
-                      const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n) {
-    return pl_render(p,g,bpm_x10,playing,in_l,in_r,out_l,out_r,n);
+void pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
+                  const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n) {
+    pl_render(p,g,bpm_x10,playing,in_l,in_r,out_l,out_r,n);
 }
 #endif

@@ -18,14 +18,15 @@ void x_reverse_o2(struct delay_types *x,struct granular *g,float *l,float *r,uns
 void x_reverse_input_o2(struct delay_types *x,struct granular *g,float *l,float *r,unsigned n);
 #ifdef PHRASE_LOOPER
 #include "phrase_looper.h"
-unsigned pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
-                      const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n);
+void pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
+                  const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n);
 /* Free backup SRAM after the delay state (0xd00..0xe5b), below the CPU
  * meter at 0xf00. 0xea0..0xedf: M7 looper state. 0xee0..0xeff: tempo
  * line written only by the M4 (cue_m4.c) and only read here. */
 #define PL ((struct phrase_looper *)0x38800ea0u)
 #define PL_TEMPO ((volatile struct pl_tempo *)0x38800ee0u)
 _Static_assert(sizeof(struct phrase_looper)==64,"looper state fills 0xea0..0xedf");
+_Static_assert(__builtin_offsetof(struct phrase_looper,last)==32,"M4-visible looper fields fill the first cache line");
 _Static_assert(sizeof(struct pl_tempo)==32,"tempo line is one cache line");
 static void pl_tempo_read(uint32_t *bpm_x10,uint32_t *playing) {
     /* The M4 has no D-cache and writes this line directly to SRAM; drop any
@@ -40,6 +41,12 @@ static void pl_tempo_read(uint32_t *bpm_x10,uint32_t *playing) {
         *bpm_x10=PL_DEFAULT_BPM_X10;
         *playing=0;
     }
+}
+/* Clean the looper's first cache line so the M4 sees its state. */
+static void pl_publish(void) {
+    __asm volatile("dsb" ::: "memory");
+    *(volatile uint32_t *)0xe000ef68u=(uint32_t)PL; /* SCB DCCMVAC */
+    __asm volatile("dsb" ::: "memory");
 }
 #endif
 #define XS ((struct delay_types *)0x38800200u)
@@ -301,6 +308,9 @@ unsigned dly_process(uint8_t *obj, void *ctx)
         if (ev.id == 0xca) filt_event=1;
         if(GS->magic==G_MAGIC && GS->owner==obj)g_event(GS,ev.id,ev.value);
         x_event(XS,ev.id,ev.value);
+#ifdef PHRASE_LOOPER
+        if(PL->magic==PL_MAGIC && PL->owner==obj)pl_event(PL,ev.id,ev.value);
+#endif
         if (ev.id == D_FLUTTER) d->flutter = ev.value;
         else if (ev.id == D_SEND) d->send = ev.value;
         else if (ev.id == D_PITCH) d->pitch = ev.value;
@@ -321,10 +331,7 @@ unsigned dly_process(uint8_t *obj, void *ctx)
         }
 #ifdef PHRASE_LOOPER
         /* Plain Delay drops the looper at once: the ring is history again. */
-        if(PL->magic==PL_MAGIC && PL->owner==obj) {
-            PL->state=PL_EMPTY;PL->len=PL->pos=0;PL->gain=0.f;
-            PL->play_seen=PL->clear_seen=-1;
-        }
+        if(PL->magic==PL_MAGIC && PL->owner==obj){pl_drop(PL);pl_publish();}
 #endif
         fw_dly_body(obj,ctx);
         rc_step_o2(RC_STATE(obj),(uint32_t *)(obj+0x30),0);
@@ -386,17 +393,8 @@ unsigned dly_process(uint8_t *obj, void *ctx)
             uint32_t bpm_x10,playing;
             pl_tempo_read(&bpm_x10,&playing);
             if(PL->magic!=PL_MAGIC || PL->owner!=obj)pl_reset(PL,obj,G_CAP);
-            unsigned ack=pl_render_o2(PL,GS,bpm_x10,playing,input[0],input[1],l,r,n);
-            /* Reflect Clear (and Play, when cleared while on) back to the UI,
-             * the same way the out-of-memory fallback acknowledges the mode. */
-            if(ack & PL_ACK_CLEAR) {
-                uint32_t msg[6]={0x39,0,*(uint32_t *)(obj+0x18),G_SIZE,0,0};
-                ((void (*)(void *,void *))0x0804e1e9u)((uint8_t *)ctx+0x1529c,msg);
-            }
-            if(ack & PL_ACK_PLAY_OFF) {
-                uint32_t msg[6]={0x39,0,*(uint32_t *)(obj+0x18),G_REVERSE,0,0};
-                ((void (*)(void *,void *))0x0804e1e9u)((uint8_t *)ctx+0x1529c,msg);
-            }
+            pl_render_o2(PL,GS,bpm_x10,playing,input[0],input[1],l,r,n);
+            pl_publish();
 #else
             g_render_o2(GS,input[0],input[1],l,r,n);
 #endif

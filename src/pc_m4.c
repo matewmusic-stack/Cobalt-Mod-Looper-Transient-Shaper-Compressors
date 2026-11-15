@@ -18,6 +18,10 @@ typedef void (*add_fn)(void *,unsigned,int);
 #define STOCK_ADD ((add_fn)0x0812028fu)
 void sat_defs(void *table,unsigned id,unsigned type,const char *label,int min,int max,const char *key);
 static void sc_boot(void);
+#ifdef PHRASE_LOOPER
+static void lp_boot(void);
+void lp_main(int loading);
+#endif
 #define PC_TAG0 0x20bu
 #define PC_SLOTS 128u
 #define PC_EVT 0x1f0u /* A-menu items 0x1f0 Bank #, 0x1f1 Save Scene, 0x1f2 Scene */
@@ -173,6 +177,9 @@ void pc_defs_hook(void *table,unsigned id,unsigned type,const char *label,int mi
     static const char *const clk_src[2]={"MIDI In","USB"};
     def_enum(table,PC_CLK_SRC,"Clock Src:",clk_src,2,"clksrc");
     sc_boot(); /* runs once per boot, before the main loop */
+#ifdef PHRASE_LOOPER
+    lp_boot();
+#endif
 }
 /* settings.tml defaults: the reader only fills tags present here. */
 void pc_settings_defaults(void *set,unsigned id,int value) {
@@ -352,6 +359,9 @@ void pc_main(void *inputs) {
         }
     }
     sc_main(pc_loading() || t->phase || (s->want&PC_MSG));
+#ifdef PHRASE_LOOPER
+    lp_main(pc_loading() || t->phase || (s->want&PC_MSG));
+#endif
     pc_quicksave(now);
     pc_autosave(PC_RECORDING || pc_loading() || t->phase || (s->want&PC_MSG));
     pc_band_refresh(now);
@@ -1046,6 +1056,53 @@ static void sc_main(int busy) {
     if(b->cursor>=b->n){b->current=b->recall;b->recall=0;mo_request(PC_UI_NOW,50u,MO_TO_USB|MO_TO_DIN);}
 }
 
+#ifdef PHRASE_LOOPER
+/* FX1 Phrase Looper, M4 side, in the same main-loop slot as Scenes recall
+ * and through the same native knob call, so the screen, the saved project
+ * and the audio engine all follow.
+ * - REC, STOP and CLEAR are pedal-style buttons: once the M7 has seen a
+ *   press (0 -> 1 in its event queue), they are set back to 0 here.
+ * - While the loop plays (PL_PLAY), the tracks that feed FX1 (FX1 send > 0)
+ *   and were not muted are muted; they are unmuted when it records, dubs,
+ *   stops, clears or leaves the mode. Tracks the user muted are left alone,
+ *   and a track the user unmutes during playback stays unmuted. */
+#include "phrase_looper.h"
+#define LP_PL ((const volatile struct phrase_looper *)0x38800ea0u)
+#define LP_TEMPO ((volatile struct pl_tempo *)0x38800ee0u)
+#define LP_MUTE 0x160u    /* track Mute (chmute) */
+#define LP_FX1 0xdau      /* track FX1 send (fx1send) */
+#define LP_APPLIED 0x80000000u
+static void lp_knob(unsigned cell,unsigned id,int v) {uint16_t c=(uint16_t)cell;SC_KNOB(PC_SESSION,&c,id,v,0);}
+static int lp_track(unsigned i) {return *(void *const *)(sc_table(i)+4)!=0;}
+/* A mute record from before this boot must never unmute anything. */
+static void lp_boot(void) {backup_enable();PWR_CR1|=1u<<8;LP_TEMPO->muted=0;}
+void lp_main(int loading) {
+    backup_enable();PWR_CR1|=1u<<8;
+    volatile struct pl_tempo *t=LP_TEMPO;
+    /* A project or bank load replaces the mixer: forget, do not unmute. */
+    if(loading){t->muted=0;return;}
+    uint8_t *fx1=sc_table(0x14u);
+    if(!*(void *const *)(fx1+4))return;
+    int looper=fw_get(fx1,0x1a0u)==1;
+    if(looper) {
+        static const uint16_t buttons[]={LP_REC,LP_STOP,LP_CLEAR};
+        for(unsigned i=0;i<3;i++)if(fw_get(fx1,buttons[i])!=0)lp_knob(0x14u,buttons[i],0);
+    }
+    int play=looper && LP_PL->magic==PL_MAGIC && LP_PL->state==PL_PLAY;
+    uint32_t m=t->muted;
+    if(play && !(m&LP_APPLIED)) {
+        for(unsigned i=0;i<12u;i++)
+            if(lp_track(i) && fw_get(sc_table(i),LP_FX1)>0 && fw_get(sc_table(i),LP_MUTE)==0) {
+                lp_knob(i,LP_MUTE,1);m|=1u<<i;
+            }
+        t->muted=m|LP_APPLIED;
+    } else if(!play && m) {
+        for(unsigned i=0;i<12u;i++)
+            if((m>>i&1u) && lp_track(i) && fw_get(sc_table(i),LP_MUTE)!=0)lp_knob(i,LP_MUTE,0);
+        t->muted=0;
+    }
+}
+#endif
 static void *x_el(void *node) {return node ? (*(void *(**)(void *))*(void **)node)(node) : 0;}
 static void x_setint(void *el,const char *name,int v) {void *a=X_ATTR(el,name);if(a)X_SETINT(a,v);}
 static int x_getint(void *el,const char *name,int *v) {void *a=X_FIND(el,name);return a && X_QUERY(a,v)==0;}

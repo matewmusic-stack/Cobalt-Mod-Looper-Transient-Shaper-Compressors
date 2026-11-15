@@ -7,8 +7,8 @@ spec=importlib.util.spec_from_file_location('previous',oldroot/'patch_bluebox.py
 # WILD off must preserve all existing sound paths, including the current Tape.
 if LOOPER_BUILD:
  # The Phrase Looper replaces Granular, so its final phase is left out. The
- # Granular parameter words GS+0x10..0x1b hold looper defaults: not compared.
- def gsx(u):g=bytes(u.mem_read(GS,168));return g[:16]+g[28:72]
+ # Granular parameter words GS+0x10..0x1f hold looper defaults: not compared.
+ def gsx(u):g=bytes(u.mem_read(GS,168));return g[:16]+g[32:72]
  a,_,_=dsetup(previous.transform(stock));b,_,_=dsetup();same=True;worst=0.
  for n in range(2000):
   mode=[2,0,3,4,5][n//400]

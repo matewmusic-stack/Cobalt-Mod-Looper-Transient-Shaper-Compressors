@@ -103,8 +103,8 @@ u.mem_write(P+0xc398,b'\x01')
 stub(u,0x812afd8,lambda u:None)
 # Capture events while allowing native bind/setter to store values normally.
 changes=[];stub(u,0x813a414,lambda u:changes.append(bytes(u.mem_read(u.reg_read(UC_ARM_REG_R1),24))))
-KNOBS=[(0x1a1,125,'12.5%'),(0x1a3,2,'2'),(0x1a4,1000,'100.0%')] if LOOPER_BUILD else [(0x1a1,125,'12.5%'),(0x1a2,80,'80ms'),(0x1a3,4,'4'),(0x4a,-7,'-7 st'),(0x1a4,1000,'100.0%')]
-LABELS=['DRY/W','BARS','OVERD'] if LOOPER_BUILD else ['POSIT','SIZE ','DENSI','PITCH','JITTE']
+KNOBS=[(0x1a1,125,'12.5%'),(0x1a3,2,'2 bars'),(0x1a4,1000,'100.0%')] if LOOPER_BUILD else [(0x1a1,125,'12.5%'),(0x1a2,80,'80ms'),(0x1a3,4,'4'),(0x4a,-7,'-7 st'),(0x1a4,1000,'100.0%')]
+LABELS=['LEVEL','BARS','DUB'] if LOOPER_BUILD else ['POSIT','SIZE ','DENSI','PITCH','JITTE']
 for pid,value,expected in KNOBS:
  knob(u,pid,value);w32(u,TICK,10000)
  # A zero delta still runs the physical-turn route without changing the value.
@@ -127,7 +127,7 @@ for pid,value,expected in [(0x1a7,350,'35.0%'),(0x1a8,700,'70.0%'),(0x1a9,2000,'
 # Separate knobs retain independent deadlines, and a native rebind during the
 # hold does not shorten the timer or show an out-of-date value.
 knob(u,0x1a1,125);W2=W+0x3d0;u.mem_write(W2,bytes(0x3d0));u.mem_write(W2+0x32,struct.pack('<H',20));u.mem_write(W2+0x3c9,b'\x01')
-K2,A2,TA,B2,TB,L1,L2=(0x1a4,800,'80.0%',300,'30.0%','DRY/W','OVERD') if LOOPER_BUILD else (0x1a2,80,'80ms',120,'120ms','POSIT','SIZE ')
+K2,A2,TA,B2,TB,L1,L2=(0x1a4,800,'80.0%',300,'30.0%','LEVEL','DUB') if LOOPER_BUILD else (0x1a2,80,'80ms',120,'120ms','POSIT','SIZE ')
 call(u,0x8127b84,W2,K2,A2,1)
 w32(u,TICK,30000);call(u,S['dly_turn'],W,0)
 w32(u,TICK,31000);call(u,S['dly_turn'],W2,0)

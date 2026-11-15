@@ -42,8 +42,9 @@ static inline void g_reset(struct granular *g,void *owner,float *buffer) {
     uint32_t *p=(uint32_t *)g;
     for(unsigned i=0;i<sizeof(*g)/4;i++)p[i]=0;
 #ifdef PHRASE_LOOPER
-    /* Same as the looper UI defaults (sat_m4.h): Clear off, 2 bars, 100% wet. */
-    g->owner=owner;g->buffer=buffer;g->size=0;g->density=2;
+    /* Same as the looper UI defaults (sat_m4.h): 2 bars, Level 100%,
+     * Dub 100%, buttons off. */
+    g->owner=owner;g->buffer=buffer;g->size=0;g->density=2;g->jitter=1000;
     g->position=1000;g->feedback=400;g->rng=0x63a41d7u;g->magic=G_MAGIC;
 #else
     g->owner=owner;g->buffer=buffer;g->size=80;g->density=4;

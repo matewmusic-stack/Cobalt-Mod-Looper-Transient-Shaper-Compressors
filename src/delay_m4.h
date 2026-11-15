@@ -1,11 +1,16 @@
 /* Native desktop FX parameter lists and compact layout. */
 #include <stdint.h>
 #ifdef PHRASE_LOOPER
+#include "phrase_looper.h"
 #define G_DENSITY_MAX 2     /* Looper Bars: 1..2 */
 #define G_TITLE "Looper"
+#define LP_STATE ((const volatile struct phrase_looper *)0x38800ea0u)
+#define LP_ONLY(id) ((id)==LP_STOP) /* looper-only controls, hidden in other modes */
+static uint32_t lp_title(char *t);
 #else
 #define G_DENSITY_MAX 4
 #define G_TITLE "Granulr"
+#define LP_ONLY(id) 0
 #endif
 typedef void (*vfn_rect)(void *,int *);
 typedef void (*populate_fn)(uint8_t *,short *);
@@ -48,8 +53,8 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
     if(*slot!=0x14)return result;
     if(gran_mode(app)) {
 #ifdef PHRASE_LOOPER
-        /* Phrase Looper: three knobs, then Sync, Play and Clear toggles. */
-        static const uint16_t ids[]={G_POS,G_DENSITY,G_JITTER,G_FREEZE,G_REVERSE,G_SIZE};
+        /* Phrase Looper: Bars, Level, Dub knobs; REC, STOP, CLEAR buttons; Sync. */
+        static const uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_REC,LP_STOP,LP_CLEAR,G_FREEZE};
 #else
         static const uint16_t ids[]={G_POS,G_SIZE,G_DENSITY,0x4a,G_JITTER,0x39,0x3d,G_FREEZE,G_REVERSE};
 #endif
@@ -62,7 +67,7 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
     } else {
         uint16_t ids[13],id;int values[13],value;unsigned count=0;
         for(unsigned i=0;((unsigned (*)(void *,unsigned,uint16_t *,int *,void *))0x08138505u)(list,i,&id,&value,0);i++) {
-            if((id>=G_MODE && id<=T_WILD) || id==T_LOCUT)continue; /* Lo C: Tape inserts it below */
+            if((id>=G_MODE && id<=T_WILD) || id==T_LOCUT || LP_ONLY(id))continue; /* Lo C: Tape inserts it below */
             int mode=fx_mode(app);
             if(mode==2 && (id==0x4a || id==0x4b))continue;
             if(mode==5 && (id==0x4a || id==0x4b || id==0x3a || id==0x3d))continue;
@@ -102,8 +107,8 @@ static void place(uint8_t *p,int slot) {
                 x=x0+(i<6?0:240);y=y0+45-44*(i&1);
             } else if(mode==4 && i==5){x=x0;y=y0+45;}
 #ifdef PHRASE_LOOPER
-            else if(gran && (i==3||i==4)){x=x0;y=y0+1+44*(i-3);}  /* Sync, Play */
-            else if(gran && i==5){x=x0+240;y=y0+45;}              /* Clear */
+            else if(gran && (i==3||i==4)){x=x0;y=y0+45-44*(i-3);}      /* REC below, STOP above */
+            else if(gran && (i==5||i==6)){x=x0+240;y=y0+45-44*(i-5);}  /* CLEAR below, Sync above */
 #else
             else if(gran && (i==7||i==8)){x=x0;y=y0+45-44*(i-7);}
 #endif
@@ -139,6 +144,9 @@ struct fx_ui {
     int32_t density_fraction,density_value;uint8_t *density_widget;
     struct ui_value value[7];
     int32_t log_fraction,log_value;uint8_t *log_widget; /* exp.8 Hz/rate travel */
+#ifdef PHRASE_LOOPER
+    uint8_t *title;uint32_t title_key; /* FX1 title label, live looper state */
+#endif
 };
 #define UI ((struct fx_ui *)0x38800b00u)
 #define UI_MAGIC 0x4658553bu
@@ -169,6 +177,9 @@ static void ui_register(uint8_t *p,int slot) {
         u->pitch_widget=0;u->pitch_fraction=0;
         u->density_widget=0;u->density_fraction=0;
         u->log_widget=0;u->log_fraction=0;
+#ifdef PHRASE_LOOPER
+        u->title=0;u->title_key=~0u;
+#endif
         for(unsigned i=0;i<7;i++)u->value[i].active=0;
     }
 }
@@ -221,6 +232,9 @@ static void label_value(uint8_t *w) {
         if(value>=10)*p++=(char)('0'+(value/10)%10);
         *p++=(char)('0'+value%10);
         if(id==G_SIZE || id==T_SEGMENT || id==T_RELEASE || id==0x33){*p++='m';*p++='s';}
+#ifdef PHRASE_LOOPER
+        if(id==G_DENSITY){const char *b=value>1?" bars":" bar";while(*b)*p++=*b++;}
+#endif
         if(id==T_HICUT || id==T_LOCUT){*p++='H';*p++='z';}
         if(id==0x4a){*p++=' ';*p++='s';*p++='t';}
     }
@@ -318,6 +332,12 @@ void dly_tick(uint8_t *p,void *flags) {
     unsigned slot=*(uint16_t *)(p+P_SLOT);
     if(u->panel!=p || !(slot==0x14 || (slot==0x15 && sg_selected((void *)0x300173d0u))))return;
     uint32_t now=UI_NOW;
+#ifdef PHRASE_LOOPER
+    if(slot==0x14 && u->title && fx_mode((void *)0x300173d0u)==1) {
+        char t[12];uint32_t k=lp_title(t);
+        if(k!=u->title_key){u->title_key=k;((void (*)(void *,const char *))0x0813fe4bu)(u->title,t);}
+    }
+#endif
     for(unsigned i=0;i<7;i++)if(u->value[i].active) {
         struct ui_value *v=&u->value[i];uint8_t *w=v->widget;
         int valid=w && *(uint16_t *)(w+0x32)==slot && value_index(*(uint16_t *)(w+0x94))==(int)i;
@@ -399,7 +419,33 @@ unsigned dly_event(uint8_t *p,uint8_t *ev) {
 
 /* Patch only the native Delay title setter; FX2's title path remains native.
  * Mode 5 (plain Delay) keeps the stock "Delay" title. */
+#ifdef PHRASE_LOOPER
+/* FX1 title while the looper is selected: its state, and the bar being
+ * recorded ("REC 1/2"). Returns a key that changes when the text does. */
+static uint32_t lp_title(char *t) {
+    const volatile struct phrase_looper *s=LP_STATE;
+    unsigned st=s->magic==PL_MAGIC?s->state:PL_EMPTY,bars=s->bars,bar=0;
+    const char *w=st==PL_ARMED?"ARMED":st==PL_REC?"REC ":st==PL_PLAY?"PLAY":st==PL_DUB?"DUB":st==PL_STOP?"STOP":G_TITLE;
+    char *q=t;
+    while(*w)*q++=*w++;
+    if(st==PL_REC && s->len && bars>=1u && bars<=2u) {
+        bar=s->pos*bars/s->len+1u;if(bar>bars)bar=bars;
+        *q++=(char)('0'+bar);*q++='/';*q++=(char)('0'+bars);
+    }
+    *q=0;
+    return st|bar<<8|bars<<16;
+}
+#endif
 void dly_title(void *label,const char *stock) {
+#ifdef PHRASE_LOOPER
+    if(fx_mode((void *)0x300173d0u)==1) {
+        struct fx_ui *u=ui_state();char t[12];uint32_t k=lp_title(t);
+        /* Keep the label for live updates only if it belongs to this panel. */
+        if(u->panel && (uint8_t *)label>=u->panel && (uint8_t *)label<u->panel+0x20000){u->title=label;u->title_key=k;}
+        ((void (*)(void *,const char *))0x0813fe4bu)(label,t);
+        return;
+    }
+#endif
     ((void (*)(void *,const char *))0x0813fe4bu)(label,
         fx_mode((void *)0x300173d0u)==0?"Warp":fx_mode((void *)0x300173d0u)==1?G_TITLE:fx_mode((void *)0x300173d0u)==2?"Tape":fx_mode((void *)0x300173d0u)==3?"Ducked":fx_mode((void *)0x300173d0u)==4?"RevDly":stock);
 }

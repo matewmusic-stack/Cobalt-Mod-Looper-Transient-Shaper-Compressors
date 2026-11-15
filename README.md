@@ -407,27 +407,31 @@ Host checks for the looper logic (any C compiler):
 cc -std=c11 -O1 -Wall -Wextra -Werror -DPHRASE_LOOPER -Isrc tests/looper_host.c -o build/looper_host -lm && build/looper_host
 ```
 
-Select **Phrase Looper** in the FX1 mode list (where Granular was). Controls:
+Turn up the FX1 send on the tracks to loop and select **Phrase Looper** in the FX1 mode list (where Granular was). The FX1 title shows the state: `Looper` (empty), `ARMED`, `REC 1/2`, `PLAY`, `DUB` or `STOP`.
 
-| Control | Range | What it does |
+| Control | Kind | What it does |
 |---|---|---|
-| Dry/Wet | 0–100 % (default 100 %) | Blend of FX1 input and loop on the FX1 return |
-| Bars | 1 or 2 (default 2) | Loop length in 4/4 bars at the project BPM |
-| Overdub | 0–100 % (default 0 %) | Live input layered into the loop on every pass; 0 % keeps the loop unchanged |
-| Sync | Off/On (default Off) | On: if the sequencer is stopped, Play arms and recording starts when it starts |
-| Play | Off/On | On: record if empty (then loop), otherwise play from the start. Off: stop (the loop is kept; stopping during a take keeps what was recorded) |
-| Clear | Off/On | Empties the loop and turns Clear and Play back off |
+| REC | button | Empty: record; at the end of the bars the loop plays by itself. Recording: close the loop now. Playing: overdub on/off. Stopped: play from the start. |
+| STOP | button | Stop. When stopped, play from the start. During a take, keep what was recorded. |
+| CLEAR | button | Empty the loop. |
+| Sync | on/off (default off) | On: with the sequencer stopped, REC arms and recording starts when it starts. REC again cancels. |
+| Bars | 1 or 2 (default 2) | Loop length in 4/4 bars at the project BPM. |
+| Level | 0–100 % (default 100 %) | Loop volume on the FX1 return. The return carries only the loop. |
+| Dub | 0–100 % (default 100 %) | How loud new input is layered while overdubbing. |
 
-How it works: the looper uses the Granular SDRAM buffer, allocated once when FX1 is built and before FX2. It asks for room for 2 bars at 60 BPM (3 MB), but only if 4 MB of SDRAM stays free afterwards. Otherwise it falls back to the hardware-tested Granular size (2 s: 1 bar at 120 BPM), and longer loops drop to 1 bar or to the buffer length. The M4 publishes the project BPM and whether the sequencer is running to backup SRAM `0x38800EE0`, and the looper state lives at `0x38800EA0`. FX2 and the bootloader are not patched. Leaving the looper mode empties the loop.
+REC, STOP and CLEAR are pedal-style: the M7 counts a press when a button goes from 0 to 1 in the FX1 event queue, and the M4 sets it back to 0 at once, so the buttons never stay lit. A value seen before the first one, such as a project load, only latches. STOP uses a new FX1 parameter, `0x1ba` (`lpstop`), in an empty stock definition slot; it is hidden in the other FX1 modes.
 
-Not yet verified on hardware:
+Auto-mute: while the loop plays, the M4 mutes the tracks whose FX1 send is above 0 and that were not already muted. It uses the same native knob call as Scenes recall, so the Mute buttons, the saved project and the audio engine all follow. Those tracks are unmuted while recording or overdubbing, and on STOP, CLEAR or leaving the mode. A track the user unmutes during playback stays unmuted, and tracks the user muted are never touched. The record of muted tracks is cleared at boot and on project or bank loads, without unmuting anything.
 
-- the BPM scaling of project setting `0x85` (the looper accepts BPM, tenths or hundredths);
-- that the posted Clear/Play reset reaches the UI (if it does not, switch Clear and Play off yourself);
-- the start latency of Sync, which follows the sequencer position as Scenes does (one UI tick). Sync does not find bar boundaries while the sequencer is already running; Play then records at once;
-- free SDRAM after boot on a real unit, and CPU load.
+How it works: the looper uses the Granular SDRAM buffer, allocated once when FX1 is built and before FX2. It asks for room for 2 bars at 60 BPM (3 MB), but only if 4 MB of SDRAM stays free afterwards. Otherwise it falls back to the hardware-tested Granular size (2 s: 1 bar at 120 BPM), and longer loops drop to 1 bar or to the buffer length. The M4 publishes the project BPM (setting `0x85`, plain BPM 40–250), the sequencer state and its mute record to backup SRAM `0x38800EE0`. The M7 looper state lives at `0x38800EA0`, and its first cache line is cleaned after every block for the M4 (title and auto-mute). FX2 and the bootloader are not patched. Leaving the looper mode empties the loop.
 
-Keep a stock `BLUEBOX.BIN` and the recovery card (`recovery.html`) at hand before trying it.
+Checked on hardware with the first looper build: it boots, TOOLS shows `Cblt 1.2`, and a 1-bar loop at 120 BPM lasts 2 s. Not yet checked on hardware:
+
+- the pedal buttons, live title and auto-mute of this build;
+- the start latency of Sync, which follows the sequencer position as Scenes does (one UI tick). Sync does not find bar boundaries while the sequencer is already running; REC then records at once;
+- CPU load and sound.
+
+Keep the stock `BLUEBOX.BIN` at hand before trying it.
 
 ### Testing the Phrase Looper in the emulator
 
@@ -439,4 +443,4 @@ LOOPER=1 .venv/bin/python tests/test_looper.py /path/to/stock/BLUEBOX.BIN
 LOOPER=1 .venv/bin/python tests/test_wild_094.py /path/to/stock/BLUEBOX.BIN
 ```
 
-`tests/test_looper.py` runs the compiled looper inside the stock native FX1 delay object: construction and SDRAM allocation (roomy, tight and full arenas), record and sample-exact playback, Dry/Wet, Stop/Play, Clear and its UI acknowledgements, Sync driven by the real M4 tempo publisher, BPM scaling, partial takes, Overdub bounds, buffer-overrun watch, leaving the mode, and relative instruction counts. Every other `tests/test_*.py` also runs with `LOOPER=1`. The six Granular-renderer suites report SKIP there, and `test_wild_094.py` checks that Tape, Warp, Ducked, Reverse and Delay match Cobalt v0.9.4. The emulator does not model STM32 timing, the caches shared between the two cores, or sound.
+`tests/test_looper.py` runs the compiled looper inside the stock native FX1 delay object, with the M4 side on the real parameter tables: construction and SDRAM allocation (roomy, tight and full arenas), pedal presses through the FX1 event queue, record and sample-exact playback, Level, overdub, STOP and CLEAR, auto-mute and unmute through the native knob call, the button reset, the FX1 title states, Sync driven by the real M4 tempo publisher, BPM, early-closed takes, overdub bounds, a buffer-overrun watch, leaving the mode, and relative instruction counts. Every other `tests/test_*.py` also runs with `LOOPER=1`. The six Granular-renderer suites report SKIP there, and `test_wild_094.py` checks that Tape, Warp, Ducked, Reverse and Delay match Cobalt v0.9.4. The emulator does not model STM32 timing, the caches shared between the two cores, or sound.
