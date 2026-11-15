@@ -19,6 +19,7 @@ void x_reverse_input_o2(struct delay_types *x,struct granular *g,float *l,float 
 #ifdef PHRASE_LOOPER
 #include "phrase_looper.h"
 void pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x100,uint32_t playing,
+                  const struct pl_song *song,
                   const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n);
 /* Free backup SRAM after the delay state (0xd00..0xe5b), below the CPU
  * meter at 0xf00. 0xea0..0xedf: M7 looper state. 0xee0..0xeff: tempo
@@ -41,6 +42,26 @@ static void pl_tempo_read(uint32_t *bpm_x100,uint32_t *playing) {
         *bpm_x100=PL_DEFAULT_BPM_X100;
         *playing=0;
     }
+}
+/* The bluebox's song position (960 ticks per beat), exactly as the header's
+ * bar:beat display reads it (0x08121fc4): engine = *(0x3000a894), position at
+ * engine+0x78b0 when the app's flag +0x7408 is set, else +0x78b8. Every line
+ * read is cleaned and invalidated first (DCCIMVAC): fresh whichever core
+ * writes it, and safe even if this core holds it dirty. */
+static void pl_line(uint32_t a) {*(volatile uint32_t *)0xe000ef70u=a&~31u;}
+static void pl_song_read(struct pl_song *s) {
+    s->ok=0;s->ticks=0;
+    __asm volatile("dsb" ::: "memory");
+    pl_line(0x3000a894u);pl_line(0x300173d0u+0x7408u);
+    __asm volatile("dsb\nisb" ::: "memory");
+    uint32_t e=*(volatile uint32_t *)0x3000a894u;
+    if(!((e>=0x24000000u && e<=0x24080000u-0x7900u) || (e>=0x30000000u && e<=0x30048000u-0x7900u) ||
+         (e>=0xc0000000u && e<=0xc4000000u-0x7900u)))return;
+    uint32_t a=e+(*(volatile uint8_t *)(0x300173d0u+0x7408u)?0x78b0u:0x78b8u);
+    pl_line(a);
+    __asm volatile("dsb\nisb" ::: "memory");
+    s->ticks=*(volatile int32_t *)a;            /* low word: 2^31 ticks = 12 days at 120 BPM */
+    s->ok=1;
 }
 /* Clean the looper's first cache line so the M4 sees its state. */
 static void pl_publish(void) {
@@ -392,8 +413,9 @@ unsigned dly_process(uint8_t *obj, void *ctx)
 #ifdef PHRASE_LOOPER
             uint32_t bpm_x100,playing;
             pl_tempo_read(&bpm_x100,&playing);
+            struct pl_song song;pl_song_read(&song);
             if(PL->magic!=PL_MAGIC || PL->owner!=obj)pl_reset(PL,obj,G_BYTES/PL_FRAME);
-            pl_render_o2(PL,GS,bpm_x100,playing,input[0],input[1],l,r,n);
+            pl_render_o2(PL,GS,bpm_x100,playing,&song,input[0],input[1],l,r,n);
             pl_publish();
 #else
             g_render_o2(GS,input[0],input[1],l,r,n);
@@ -498,20 +520,20 @@ unsigned dly_construct(uint8_t *obj) {
     uint32_t safe=limit<0xc3400000u?limit:0xc3400000u;
     uint32_t avail=cursor>=0xc0000000u && cursor<=safe?safe-cursor:0u;
     uint32_t want=avail>PL_RESERVE?(avail-PL_RESERVE)&~31u:0u;
-    if(want>PL_BYTES+PLX_BYTES)want=PL_BYTES+PLX_BYTES;   /* loop audio + stretch state */
-    if(want>G_BYTES+PLX_BYTES) {
+    if(want>PL_BYTES+PLT_BYTES)want=PL_BYTES+PLT_BYTES;   /* loop audio + stretch and sync state */
+    if(want>G_BYTES+PLT_BYTES) {
         buffer=((void *(*)(unsigned))0x080412a5u)(want);
         if(buffer)requested=want;
     }
-    if(!buffer && cursor>=0xc0000000u && cursor<=limit && G_BYTES+PLX_BYTES<=limit-cursor &&
-       cursor<=0xc3400000u-(G_BYTES+PLX_BYTES)) {
-        buffer=((void *(*)(unsigned))0x080412a5u)(G_BYTES+PLX_BYTES);
-        if(buffer)requested=G_BYTES+PLX_BYTES;
+    if(!buffer && cursor>=0xc0000000u && cursor<=limit && G_BYTES+PLT_BYTES<=limit-cursor &&
+       cursor<=0xc3400000u-(G_BYTES+PLT_BYTES)) {
+        buffer=((void *(*)(unsigned))0x080412a5u)(G_BYTES+PLT_BYTES);
+        if(buffer)requested=G_BYTES+PLT_BYTES;
     }
 #endif
     g_reset(GS,obj,buffer);
 #ifdef PHRASE_LOOPER
-    pl_reset(PL,obj,requested?(requested-PLX_BYTES)/PL_FRAME:0u);
+    pl_reset(PL,obj,requested?(requested-PLT_BYTES)/PL_FRAME:0u);
     PL->free_kb=avail/1024u;
     pl_publish();
     __asm volatile("dsb" ::: "memory");

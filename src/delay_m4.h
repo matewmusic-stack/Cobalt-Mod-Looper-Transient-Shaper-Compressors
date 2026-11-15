@@ -148,6 +148,7 @@ struct fx_ui {
     int32_t log_fraction,log_value;uint8_t *log_widget; /* exp.8 Hz/rate travel */
 #ifdef PHRASE_LOOPER
     uint8_t *title;uint32_t title_key; /* FX1 title label, live looper state */
+    int32_t stretch_shown;              /* Stretch value its knob shows; -1 = redraw */
 #endif
 };
 #define UI ((struct fx_ui *)0x38800b00u)
@@ -184,7 +185,7 @@ static void ui_register(uint8_t *p,int slot) {
         u->density_widget=0;u->density_fraction=0;
         u->log_widget=0;u->log_fraction=0;
 #ifdef PHRASE_LOOPER
-        u->title=0;u->title_key=~0u;
+        u->title=0;u->title_key=~0u;u->stretch_shown=-1;
 #endif
         for(unsigned i=0;i<7;i++)u->value[i].active=0;
     }
@@ -350,13 +351,27 @@ void dly_tick(uint8_t *p,void *flags) {
         char t[12];uint32_t k=lp_title(t);
         if(k!=u->title_key){u->title_key=k;((void (*)(void *,const char *))0x0813fe4bu)(u->title,t);}
     }
+    /* The Stretch knob always shows its mode (Off/Vari/Keep), never its label. */
+    if(slot==0x14 && fx_mode((void *)0x300173d0u)==1)for(unsigned i=0;i<8;i++) {
+        uint8_t *w=KNOB_W(p,i);
+        if(*(uint16_t *)(w+0x94)!=LP_STRETCH)continue;
+        int v=*(int *)(w+0x98);
+        if(v!=u->stretch_shown){u->stretch_shown=v;label_value(w);}
+        break;
+    }
 #endif
     for(unsigned i=0;i<7;i++)if(u->value[i].active) {
         struct ui_value *v=&u->value[i];uint8_t *w=v->widget;
         int valid=w && *(uint16_t *)(w+0x32)==slot && value_index(*(uint16_t *)(w+0x94))==(int)i;
         if(!valid){v->active=0;continue;}
         if(now-v->last<3000u)label_value(w);
-        else {v->active=0;((void (*)(void *,unsigned))0x081278b1u)(w,1);}
+        else {
+            v->active=0;
+#ifdef PHRASE_LOOPER
+            if(*(uint16_t *)(w+0x94)==LP_STRETCH)continue;   /* keeps showing its mode */
+#endif
+            ((void (*)(void *,unsigned))0x081278b1u)(w,1);
+        }
     }
 }
 /* Native action 14/15 selects FX1 (slot20), 16/17 selects FX2 (slot21).

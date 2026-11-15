@@ -81,10 +81,45 @@ struct phrase_looper {
     uint32_t stretch;             /* 0 off, 1 varispeed, 2 keep pitch (experiment) */
 };
 
+/* The bluebox's song position, read by the M7 each block: 960 ticks per
+ * beat, as the header's bar:beat display uses (engine +0x78b0/+0x78b8). */
+#define PLQ_BEAT 960
+#define PLQ_BAR 3840                  /* 4/4 */
+struct pl_song {int32_t ok,ticks;};
+/* Song-position lock, kept after the stretch state. The looper keeps its own
+ * sample-accurate song position (qi + qf ticks), advanced by the tempo every
+ * sample and pulled 1/8 of the way toward each new value the bluebox shows,
+ * so it stays locked whether that value changes every block or every few
+ * ms. A difference of more than one beat (a locate, loop jump or start)
+ * takes the bluebox's value at once. */
+#define PLS_MAGIC 0x504c5359u
+#define PLS_STILL 64u                 /* blocks without movement = stopped (~43 ms) */
+#define PLS_SEEN 1u                   /* position seen since the last stop */
+#define PLS_LOCKED 2u                 /* the loop follows the song position */
+#define PLS_QREC 4u                   /* this take ends on a bar line */
+struct pl_sync {
+    uint32_t magic;
+    uint32_t still;                   /* blocks since the song position changed */
+    int32_t last;                     /* last song position seen */
+    int32_t qi;                       /* our song position: integer ticks */
+    float qf;                         /* + fraction of a tick */
+    float r;                          /* ticks per sample at the current tempo */
+    int32_t start;                    /* tick where the loop starts (a bar line) */
+    int32_t end;                      /* recording: tick to stop at */
+    uint32_t lt;                      /* loop length in ticks */
+    uint32_t flags;
+    int32_t bar;                      /* bar index at the last sample (for bar crossings) */
+    int32_t cycle;                    /* Off: loop cycle being played */
+    uint32_t spare[4];
+};
+static inline int32_t pl_fdiv(int32_t a,int32_t b) {int32_t q=a/b;if((a%b)<0)q--;return q;}
+static inline int32_t pl_mod(int32_t a,int32_t b) {int32_t m=a%b;return m<0?m+b:m;}
+
 /* Tempo-follow state, kept in SDRAM just after the loop audio (PLX_BYTES):
  * backup SRAM has no room left. Rebuilt whenever its magic is wrong. */
 #define PLX_MAGIC 0x504c5853u
 #define PLX_BYTES 64u
+#define PLT_BYTES 128u            /* after the loop audio: stretch state, then sync state */
 #define PLX_G 2048u               /* keep pitch: grain length, 42.7 ms */
 #define PLX_H (PLX_G/2u)          /* hop: two Hann grains overlap and sum to 1 */
 #define PLX_D 240                 /* WSOLA search range, +/-5 ms */
@@ -166,14 +201,21 @@ static inline int16_t pl_q(float x) {
     return (int16_t)s;
 }
 static inline float pl_f(int16_t q) {return (float)q*(1.f/PL_SCALE);}
-/* In-place declick at both ends of a freshly recorded loop. */
+/* In-place declick of a freshly recorded loop: 1 ms in at the start, so a
+ * downbeat recorded on the bar line keeps its attack, 5 ms out at the end. */
+#define PL_RAMP_IN 48u
 static inline void pl_seal(int16_t *buffer,uint32_t len) {
-    uint32_t r=PL_RAMP;
+    uint32_t r=PL_RAMP,ri=PL_RAMP_IN;
     if(r>len/4u)r=len/4u;
+    if(ri>r)ri=r;
+    for(uint32_t i=0;i<ri;i++) {
+        float g=(float)i*(1.f/(float)PL_RAMP_IN);
+        int16_t *a=buffer+2u*i;
+        a[0]=pl_q(pl_f(a[0])*g);a[1]=pl_q(pl_f(a[1])*g);
+    }
     for(uint32_t i=0;i<r;i++) {
         float g=(float)i*(1.f/(float)PL_RAMP);
-        int16_t *a=buffer+2u*i,*b=buffer+2u*(len-1u-i);
-        a[0]=pl_q(pl_f(a[0])*g);a[1]=pl_q(pl_f(a[1])*g);
+        int16_t *b=buffer+2u*(len-1u-i);
         b[0]=pl_q(pl_f(b[0])*g);b[1]=pl_q(pl_f(b[1])*g);
     }
 }
@@ -192,16 +234,32 @@ static inline void pl_close(struct phrase_looper *p,int16_t *buffer,uint32_t nex
     } else {p->state=PL_EMPTY;p->len=p->pos=0;}
 }
 
-/* Button presses and Sync, once per block before rendering. */
-static inline void pl_controls(struct phrase_looper *p,const struct granular *g,uint32_t bpm_x100,uint32_t playing) {
+/* A take that starts on a bar line and ends Bars bars of song time later. */
+static inline void pl_qstart(struct phrase_looper *p,const struct granular *g,struct pl_sync *s,uint32_t bpm_x100,int32_t barline) {
+    int bars=g->density<1?1:g->density>2?2:g->density;
+    float r=s->r>0.f?s->r:(float)bpm_x100*(1.f/300000.f);
+    uint32_t est=(uint32_t)((float)(bars*PLQ_BAR)/r)+1u;
+    if(est>p->cap && bars>1){bars=1;est=(uint32_t)((float)PLQ_BAR/r)+1u;}
+    p->bars=(uint32_t)bars;p->bpm_x100=bpm_x100;
+    p->len=est<p->cap?est:p->cap;           /* estimate, for the title; the bar line ends it */
+    p->pos=0;p->state=PL_REC;
+    s->start=barline;s->end=barline+bars*PLQ_BAR;
+    s->flags=(s->flags|PLS_QREC)&~PLS_LOCKED;
+}
+
+/* Button presses and Sync, once per block before rendering. With the
+ * sequencer running, REC waits for the next bar line (ARMED). Stopped:
+ * with Sync on it waits for the start, otherwise it records at once (free). */
+static inline void pl_controls(struct phrase_looper *p,const struct granular *g,uint32_t bpm_x100,int run,struct pl_sync *s) {
     unsigned press=p->presses;p->presses=0;
-    if(press&PL_PRESS_CLEAR){p->state=PL_EMPTY;p->len=p->pos=0;press=0;}
+    int16_t *buf=(int16_t *)g->buffer;
+    if(press&PL_PRESS_CLEAR){p->state=PL_EMPTY;p->len=p->pos=0;s->flags&=~(PLS_LOCKED|PLS_QREC);press=0;}
     if(press&PL_PRESS_STOP) {
         switch(p->state) {
         case PL_ARMED:p->state=PL_EMPTY;break;
-        case PL_REC:pl_close(p,(int16_t *)g->buffer,PL_STOP);break;
+        case PL_REC:pl_close(p,buf,PL_STOP);s->flags&=~(PLS_LOCKED|PLS_QREC);break;
         case PL_PLAY:case PL_DUB:p->state=PL_STOP;break;
-        case PL_STOP:if(p->len){p->state=PL_PLAY;p->pos=0;}break;
+        case PL_STOP:if(p->len){p->state=PL_PLAY;p->pos=0;s->cycle=0x7fffffff;}break;
         default:break;
         }
         press&=~PL_PRESS_REC;      /* STOP wins over a simultaneous REC */
@@ -209,19 +267,22 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
     if(press&PL_PRESS_REC) {
         switch(p->state) {
         case PL_EMPTY:
-            if(g->freeze && !playing)p->state=PL_ARMED;
-            else pl_start_capture(p,g,bpm_x100);
+            if(run || g->freeze)p->state=PL_ARMED;
+            else {pl_start_capture(p,g,bpm_x100);s->flags&=~(PLS_LOCKED|PLS_QREC);}
             break;
         case PL_ARMED:p->state=PL_EMPTY;break;
-        case PL_REC:pl_close(p,(int16_t *)g->buffer,PL_PLAY);break;
+        case PL_REC:
+            if((s->flags&PLS_QREC) && run) {       /* end on the next bar line instead */
+                int32_t done=pl_fdiv(s->qi-s->start,PLQ_BAR)+1;
+                if(s->start+done*PLQ_BAR<s->end)s->end=s->start+done*PLQ_BAR;
+            } else {pl_close(p,buf,PL_PLAY);s->flags&=~(PLS_LOCKED|PLS_QREC);}
+            break;
         case PL_PLAY:p->state=PL_DUB;break;
         case PL_DUB:p->state=PL_PLAY;break;
-        case PL_STOP:if(p->len){p->state=PL_PLAY;p->pos=0;}break;
+        case PL_STOP:if(p->len){p->state=PL_PLAY;p->pos=0;s->cycle=0x7fffffff;}break;
         default:break;
         }
     }
-    if(p->state==PL_ARMED && playing && !p->transport_seen)pl_start_capture(p,g,bpm_x100);
-    p->transport_seen=playing;
 }
 
 /* Renders one block. in_* is the FX1 input copied before the native delay
@@ -328,13 +389,42 @@ static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16
     if(x->src>=(float)len)x->src-=(float)len;
 }
 
+/* Once per block: the bluebox's song position. Returns 1 when the sequencer
+ * has just started (first movement after a stop). */
+static inline int pl_song_block(struct pl_sync *s,const struct pl_song *song,uint32_t bpm_x100) {
+    s->r=(float)bpm_x100*(1.f/300000.f);       /* 960 ticks per beat, 48 kHz */
+    if(!song || !song->ok){s->still=PLS_STILL;s->flags&=~PLS_SEEN;return 0;}
+    int started=0;
+    if(song->ticks!=s->last) {
+        int fresh=s->still>=PLS_STILL || !(s->flags&PLS_SEEN);
+        float e=(float)(song->ticks-s->qi)-s->qf;
+        if(fresh || e>(float)PLQ_BEAT || e<-(float)PLQ_BEAT){s->qi=song->ticks;s->qf=0.f;s->bar=pl_fdiv(s->qi,PLQ_BAR);started=fresh;}
+        else {
+            s->qf+=e*.125f;
+            if(s->qf>=1.f || s->qf<0.f){int32_t k=(int32_t)s->qf;if((float)k>s->qf)k--;s->qi+=k;s->qf-=(float)k;}
+        }
+        s->still=0;s->flags|=PLS_SEEN;
+    } else if(s->still<PLS_STILL)s->still++;
+    s->last=song->ticks;
+    return started;
+}
+
 static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t bpm_x100,uint32_t playing,
+                             const struct pl_song *song,
                              const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n) {
     int16_t *buffer=(int16_t *)g->buffer;
     if(!buffer)return;
-    pl_controls(p,g,bpm_x100,playing);
     struct pl_stretch *x=(struct pl_stretch *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME);
+    struct pl_sync *s=(struct pl_sync *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME+PLX_BYTES);
     if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->magic=PLX_MAGIC;}
+    if(s->magic!=PLS_MAGIC){uint32_t *w=(uint32_t *)s;for(unsigned i=0;i<sizeof(*s)/4;i++)w[i]=0;s->still=PLS_STILL;s->cycle=0x7fffffff;s->magic=PLS_MAGIC;}
+    int started=pl_song_block(s,song,bpm_x100);
+    int run=s->still<PLS_STILL;
+    (void)playing;
+    pl_controls(p,g,bpm_x100,run,s);
+    /* Waiting for a bar line but the sequencer stopped: with Sync off, record
+     * now, as REC does while stopped (with Sync on, wait for the start). */
+    if(p->state==PL_ARMED && !run && !g->freeze){pl_start_capture(p,g,bpm_x100);s->flags&=~(PLS_LOCKED|PLS_QREC);}
     unsigned stretch=p->stretch && p->len;
     if(stretch && (uint32_t)x->src!=p->pos)pl_x_reset(x,p->pos);  /* controls moved the loop */
     float rate_t=1.f;
@@ -354,33 +444,85 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
     for(unsigned i=0;i<n;i++) {
         level+=dl;dub+=dd;
         float l=0.f,r=0.f;
+        int crossed=0;
+        if(run){int32_t b=pl_fdiv(s->qi,PLQ_BAR);crossed=b!=s->bar;s->bar=b;}
+        if(state==PL_ARMED && run) {
+            /* Start on a bar line: the next one, or this one if the sequencer
+             * has just started on it. */
+            if(crossed || (started && i==0 && pl_mod(s->qi,PLQ_BAR)<(int32_t)(s->r*64.f)+1)) {
+                p->pos=pos;pl_qstart(p,g,s,bpm_x100,s->bar*PLQ_BAR);
+                state=PL_REC;len=p->len;pos=0;
+            }
+        }
         if(state==PL_REC) {
-            buffer[2u*pos]=pl_q(in_l[i]);
-            buffer[2u*pos+1u]=pl_q(in_r[i]);
-            if(++pos>=len) {
-                pl_seal(buffer,len);
+            /* A bar-line take holds song positions start..end; the first
+             * sample at or past the end bar line closes it unrecorded. */
+            int done=0,locked=0;
+            if((s->flags&PLS_QREC) && run && s->qi-s->end>=0){done=1;locked=1;}
+            else {
+                buffer[2u*pos]=pl_q(in_l[i]);
+                buffer[2u*pos+1u]=pl_q(in_r[i]);
+                pos++;
+                if(s->flags&PLS_QREC) {
+                    if(pos>=p->cap)done=1;                              /* buffer full: free loop */
+                    else if(pos>=len)len=pos+1u<p->cap?pos+1u:p->cap;   /* estimate grows */
+                } else if(pos>=len)done=1;
+            }
+            if(done) {
+                len=pos;pl_seal(buffer,len);
                 pos=0;state=PL_PLAY;p->seq++;
                 pl_x_reset(x,0);
+                s->flags&=~PLS_QREC;
+                if(locked){s->flags|=PLS_LOCKED;s->lt=(uint32_t)(s->end-s->start);s->cycle=pl_fdiv(s->qi-s->start,(int32_t)s->lt);}
+                else s->flags&=~PLS_LOCKED;
             }
-        } else if(stretch && (state==PL_PLAY || state==PL_DUB || state==PL_STOP)) {
-            x->rate+=drate;
-            uint32_t w=(uint32_t)x->src;if(w>=len)w=0;
-            pl_x_frame(p,x,buffer,len,&l,&r);
-            if(state==PL_DUB && dub>0.f) {          /* layer at the read position */
-                int16_t *s=buffer+2u*w;
-                s[0]=pl_q(pl_f(s[0])+in_l[i]*dub);
-                s[1]=pl_q(pl_f(s[1])+in_r[i]*dub);
-            }
-            pos=(uint32_t)x->src;if(pos>=len)pos=0;
         } else if((state==PL_PLAY || state==PL_DUB || state==PL_STOP) && len) {
-            int16_t *s=buffer+2u*pos;
-            l=pl_f(s[0]);r=pl_f(s[1]);
-            if(state==PL_DUB && dub>0.f) {
-                s[0]=pl_q(l+in_l[i]*dub);       /* pl_q saturates at +/-2.0 */
-                s[1]=pl_q(r+in_r[i]*dub);
+            if(run && !(s->flags&PLS_LOCKED) && p->bpm_x100) {
+                /* A free loop meets a running sequencer: keep playing from
+                 * where it is, and follow the song position from here on. */
+                float lt=(float)len*(float)p->bpm_x100*(1.f/300000.f);
+                s->lt=lt<1.f?1u:(uint32_t)(lt+.5f);
+                s->start=s->qi-(int32_t)((float)pos*(float)s->lt/(float)len);
+                s->cycle=pl_fdiv(s->qi-s->start,(int32_t)s->lt);
+                s->flags|=PLS_LOCKED;
             }
-            if(++pos>=len)pos=0;
+            if(run && (s->flags&PLS_LOCKED)) {
+                int32_t rel=s->qi-s->start,cyc=pl_fdiv(rel,(int32_t)s->lt);
+                float phi=(float)(rel-cyc*(int32_t)s->lt)+s->qf;
+                float k=(float)len/(float)s->lt;
+                if(!p->stretch) {
+                    /* Off: 1:1 speed, restarted at every loop cycle of the song. */
+                    if(cyc!=s->cycle){s->cycle=cyc;pos=(uint32_t)(phi*k);}
+                    if(pos<len) {
+                        int16_t *q=buffer+2u*pos;
+                        l=pl_f(q[0]);r=pl_f(q[1]);
+                        if(state==PL_DUB && dub>0.f){q[0]=pl_q(l+in_l[i]*dub);q[1]=pl_q(r+in_r[i]*dub);}
+                        pos++;
+                    }
+                } else {
+                    /* Vari / Keep: the whole loop spans one cycle of the song. */
+                    s->cycle=cyc;
+                    x->src=phi*k;if(x->src>=(float)len)x->src-=(float)len;
+                    x->rate=s->r*k;
+                    uint32_t w=(uint32_t)x->src;if(w>=len)w=0;
+                    pl_x_frame(p,x,buffer,len,&l,&r);
+                    if(state==PL_DUB && dub>0.f){int16_t *q=buffer+2u*w;q[0]=pl_q(pl_f(q[0])+in_l[i]*dub);q[1]=pl_q(pl_f(q[1])+in_r[i]*dub);}
+                    pos=(uint32_t)x->src;if(pos>=len)pos=0;
+                }
+            } else if(stretch) {
+                x->rate+=drate;
+                uint32_t w=(uint32_t)x->src;if(w>=len)w=0;
+                pl_x_frame(p,x,buffer,len,&l,&r);
+                if(state==PL_DUB && dub>0.f){int16_t *q=buffer+2u*w;q[0]=pl_q(pl_f(q[0])+in_l[i]*dub);q[1]=pl_q(pl_f(q[1])+in_r[i]*dub);}
+                pos=(uint32_t)x->src;if(pos>=len)pos=0;
+            } else {
+                int16_t *q=buffer+2u*pos;
+                l=pl_f(q[0]);r=pl_f(q[1]);
+                if(state==PL_DUB && dub>0.f){q[0]=pl_q(l+in_l[i]*dub);q[1]=pl_q(r+in_r[i]*dub);}
+                if(++pos>=len)pos=0;
+            }
         }
+        if(run){s->qf+=s->r;if(s->qf>=1.f){int32_t k=(int32_t)s->qf;s->qi+=k;s->qf-=(float)k;}}
         float gt=state==PL_PLAY || state==PL_DUB?1.f:0.f;
         if(gain<gt){gain+=1.f/(float)PL_RAMP;if(gain>gt)gain=gt;}
         else if(gain>gt){gain-=1.f/(float)PL_RAMP;if(gain<gt)gain=gt;}
@@ -390,7 +532,7 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
         if(fade==1.f){out_l[i]=yl;out_r[i]=yr;}
         else {out_l[i]+=(yl-out_l[i])*fade;out_r[i]+=(yr-out_r[i])*fade;}
     }
-    if(state==PL_STOP && gain==0.f){pos=0;pl_x_reset(x,0);}
+    if(state==PL_STOP && gain==0.f){pos=0;pl_x_reset(x,0);s->cycle=0x7fffffff;}
     if(!stretch || state==PL_REC)x->rate=rate_t;  /* follow at once when not stretching */
     p->state=state;p->len=len;p->pos=pos;
     p->level=level;p->dub=dub;p->gain=gain;
@@ -398,6 +540,7 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
     if(!g->mode && fade==0.f) {
         /* Left the looper: the ring now holds loop audio, not history. */
         pl_drop(p);
+        s->flags&=~(PLS_LOCKED|PLS_QREC);
         g->wr=g->valid=g->countdown=0;
         g->fb_l=g->fb_r=0.f;
         for(unsigned j=0;j<4;j++)g->grains[j].len=0;

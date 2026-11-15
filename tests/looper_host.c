@@ -17,9 +17,15 @@ static float in_l[N],in_r[N],out_l[N],out_r[N];
 static uint32_t sample;
 
 static float input_at(uint32_t i) {return (float)(i%1000u)*.001f;}
+/* Simulated sequencer: song position (960 ticks/beat) moves while playing. */
+static struct pl_song song={1,0};
+static double song_t;
+static uint32_t song_x10;   /* when set, the sequencer's real tempo (x10), else the looper's */
 static void block(uint32_t bpm_x10,uint32_t playing) {
     for(unsigned i=0;i<N;i++){in_l[i]=input_at(sample+i);in_r[i]=-in_l[i];out_l[i]=out_r[i]=9.f;}
-    pl_render(&p,&g,bpm_x10*10u,playing,in_l,in_r,out_l,out_r,N);   /* the looper takes hundredths */
+    song.ticks=(int32_t)song_t;
+    pl_render(&p,&g,bpm_x10*10u,playing,&song,in_l,in_r,out_l,out_r,N);   /* the looper takes hundredths */
+    if(playing)song_t+=N*(double)(song_x10?song_x10:bpm_x10)*10.0/300000.0;
     sample+=N;
 }
 static void run(uint32_t frames,uint32_t bpm_x10,uint32_t playing) {for(uint32_t f=0;f<frames;f+=N)block(bpm_x10,playing);}
@@ -28,7 +34,7 @@ static void press(unsigned id) {pl_event(&p,id,1);pl_event(&p,id,0);}
 #define B16 ((int16_t *)g.buffer)
 static void setup(uint32_t cap) {
     /* loop audio, then the tempo-follow state (PLX_BYTES), as the firmware allocates */
-    float *buffer=calloc(((size_t)cap*PL_FRAME+PLX_BYTES)/sizeof(float),sizeof(float));
+    float *buffer=calloc(((size_t)cap*PL_FRAME+PLT_BYTES)/sizeof(float),sizeof(float));
     g_reset(&g,0,buffer);pl_reset(&p,0,cap);
     g.mode=1;g.density=2;g.freeze=0;
     pl_event(&p,LP_REC,0);pl_event(&p,LP_STOP,0);pl_event(&p,LP_CLEAR,0);
@@ -106,29 +112,83 @@ int main(void) {
     press(LP_REC);block(1200,0);CHECK(p.state==PL_ARMED,"Sync arms while stopped");
     press(LP_REC);block(1200,0);CHECK(p.state==PL_EMPTY,"REC while armed cancels");
     press(LP_REC);block(1200,0);run(N*50u,1200,0);CHECK(p.state==PL_ARMED,"stays armed");
-    block(1500,1);CHECK(p.state==PL_REC && p.len==153600u && p.bars==2,"starts on sequencer start: 2 bars @150");
+    { uint32_t k=0;while(p.state==PL_ARMED && k<8u){block(1500,1);k++;}
+      CHECK(p.state==PL_REC && p.bars==2 && k<=2u,"starts on sequencer start, on its bar line, within 2 blocks: 2 bars @150 (%u)",k); }
     press(LP_STOP);block(1200,1);press(LP_CLEAR);block(1200,1);
-    press(LP_REC);block(1200,1);CHECK(p.state==PL_REC,"Sync with the sequencer running starts at once");
+    press(LP_REC);block(1200,1);CHECK(p.state==PL_ARMED,"with the sequencer running, REC waits for the next bar line");
+    { struct phrase_looper keep=p;
+      g.freeze=0;uint32_t k=0;while(p.state==PL_ARMED && k<200u){block(1200,0);k++;}
+      CHECK(p.state==PL_REC && k<=PLS_STILL+2u,"sequencer stops while waiting, Sync off: records at once (%u blocks)",k);
+      p=keep;g.freeze=1;song_t+=0.0; }
+    { uint32_t k=0;while(p.state==PL_ARMED && k<4000u){block(1200,1);k++;}
+      CHECK(p.state==PL_REC,"... and starts on it"); }
 
     /* STOP and REC pressed in the same block: STOP wins. */
-    press(LP_CLEAR);block(1200,1);press(LP_REC);block(1200,1);run(N*500u,1200,1);
+    press(LP_CLEAR);block(1200,1);press(LP_REC);
+    { uint32_t k=0;while(p.state!=PL_REC && k<4000u){block(1200,1);k++;} }
+    run(N*500u,1200,1);
     press(LP_REC);press(LP_STOP);block(1200,1);CHECK(p.state==PL_STOP,"simultaneous REC+STOP stops (state %u)",p.state);
 
     /* Stretch: 1 bar at 120 BPM played at 128 BPM. Off keeps 96000 frames per
      * pass; Vari and Keep both advance the read position at 128/120. */
     for(unsigned mode=0;mode<3;mode++) {
-        press(LP_CLEAR);block(1200,0);g.freeze=0;g.density=1;
+        press(LP_CLEAR);g.freeze=0;g.density=1;
+        run(N*(PLS_STILL+2u),1200,0);          /* the sequencer stop registers first */
         pl_event(&p,LP_STRETCH,(int)mode);
         press(LP_REC);run(96000u,1200,0);
         CHECK(p.state==PL_PLAY && p.len==96000u && p.stretch==mode,"stretch %u: 1-bar take",mode);
         uint32_t frames=0,wraps=0,last=p.pos;
-        while(wraps<3u){block(1280,0);frames+=N;if(p.pos<last)wraps++;last=p.pos;}
+        while(wraps<3u && frames<2000000u){block(1280,0);frames+=N;if(p.pos<last)wraps++;last=p.pos;}
+        CHECK(wraps==3u,"stretch %u: the loop keeps wrapping (%u wraps)",mode,wraps);
         double per=(double)frames/3.0,want=mode?96000.0*120.0/128.0:96000.0;
         CHECK(fabs(per-want)<want*.002,"stretch %u at 128 BPM: about %.0f frames per pass (want %.0f)",mode,per,want);
         float pk=0.f;for(unsigned i=0;i<N;i++)if(fabsf(out_l[i])>pk)pk=fabsf(out_l[i]);
         CHECK(pk<=2.f && pk==pk,"stretch %u output finite and bounded",mode);
     }
     pl_event(&p,LP_STRETCH,0);
+
+    /* Song-position lock: the sequencer runs at 120.6 BPM while the looper is
+     * told 120 (0.5% off). Unlocked, that drifts ~480 samples per bar. */
+    {
+        struct pl_sync *sy=(struct pl_sync *)(void *)((uint8_t *)g.buffer+p.cap*PL_FRAME+PLX_BYTES);
+        press(LP_CLEAR);g.freeze=0;g.density=1;pl_event(&p,LP_STRETCH,0);
+        run(N*(PLS_STILL+2u),1200,0);
+        song_t=1000.0;song_x10=1206u;            /* starts mid-bar */
+        block(1200,1);block(1200,1);
+        press(LP_REC);block(1200,1);
+        CHECK(p.state==PL_ARMED,"sequencer running mid-bar: REC waits (ARMED)");
+        uint32_t k=0;while(p.state==PL_ARMED && k<4000u){block(1200,1);k++;}
+        CHECK(p.state==PL_REC && pl_mod(sy->start,PLQ_BAR)==0 && sy->start==PLQ_BAR,"take starts on the next bar line (tick %d)",(int)sy->start);
+        while(p.state==PL_REC && k<20000u){block(1200,1);k++;}
+        double bar=(double)PLQ_BAR/(12060.0/300000.0);   /* samples per bar at 120.6 */
+        CHECK(p.state==PL_PLAY && (sy->flags&PLS_LOCKED) && sy->lt==(uint32_t)PLQ_BAR,"take closes on the bar line, locked to one bar of song time");
+        CHECK(fabs((double)p.len-bar)<64.0,"take is one bar at the sequencer's real tempo: %u samples (want %.0f)",p.len,bar);
+        uint32_t resets=0,last=p.pos;int worst=0;
+        double end=song_t+20.0*PLQ_BAR;
+        while(song_t<end) {
+            block(1200,1);
+            if(p.pos<last) {
+                resets++;
+                int ph=pl_mod((int32_t)song_t-sy->start,PLQ_BAR),d=ph<PLQ_BAR/2?ph:PLQ_BAR-ph;
+                if(d>worst)worst=d;
+            }
+            last=p.pos;
+        }
+        CHECK(resets>=19u && resets<=20u,"Off: the loop restarts once per bar of song time (%u restarts in 20 bars)",resets);
+        CHECK(worst<=4,"every restart lands within 4 ticks (0.1 ms) of the bar line after 20 bars (worst %d ticks)",worst);
+        /* Vari locked: the read position follows the song phase exactly. */
+        pl_event(&p,LP_STRETCH,1);int werr=0;
+        for(unsigned b=0;b<3000u;b++) {
+            block(1200,1);
+            double ph=fmod(song_t-sy->start,(double)PLQ_BAR);
+            double want=ph*(double)p.len/PLQ_BAR,e=fabs(want-(double)p.pos);
+            if(e>(double)p.len/2)e=(double)p.len-e;
+            if((int)e>werr)werr=(int)e;
+        }
+        CHECK(werr<=200,"Vari: play position stays within 200 samples (one block of ticks) of the song phase (worst %d)",werr);
+        pl_event(&p,LP_STRETCH,0);song_x10=0u;
+        run(N*(PLS_STILL+2u),1200,0);
+    }
 
     /* Leaving the mode fades out and drops the loop and the button history. */
     g.mode=0;run(N*10u,1200,1);
