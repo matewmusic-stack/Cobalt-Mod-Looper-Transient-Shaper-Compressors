@@ -81,7 +81,10 @@ int main(void) {
 
     /* REC while playing: DUB adds input; REC again: back to PLAY. */
     int16_t before=B16[2u*50000u];
+    g.jitter=0;                    /* a Dub value saved by an older build: no longer used */
     press(LP_REC);block(1200,0);CHECK(p.state==PL_DUB,"REC while playing starts overdub");
+    { float s0=pl_f(B16[2u*(p.pos+100u)]);run(N*4u,1200,0);
+      CHECK(p.dub==1.f,"overdub is at full level, whatever Dub was saved (%.3f)",p.dub);(void)s0; }
     run(96000u,1200,0);
     CHECK(B16[2u*50000u]!=before,"overdub changed the loop");
     press(LP_REC);block(1200,0);CHECK(p.state==PL_PLAY,"REC again ends overdub");

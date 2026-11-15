@@ -55,13 +55,16 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
     if(*slot!=0x14)return result;
     if(gran_mode(app)) {
 #ifdef PHRASE_LOOPER
-        /* Phrase Looper, in the stock order the encoders follow (groups of
-         * four): Bars, Level, Dub, Stretch; the stock delay on the loop: Time
-         * (division with Beat Sync on), Feedback, Echo, Ping; then the side
-         * buttons as on the Delay page: REC, CLEAR left, STOP, Sync right. */
-        uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_STRETCH,
+        /* Phrase Looper. The encoders turn the knobs of one group of four
+         * list entries (0..3 or 4..7); a button in a group is not on them.
+         * Group 1: Bars, Level, Stretch, and Sync, drawn at the right edge.
+         * Group 2, the stock delay on the loop: Time (division with Beat Sync
+         * on), Feedback, Echo, Ping. Then REC (OVDUB) and CLEAR on the left.
+         * No Dub knob (overdub is at full level) and no on-screen STOP: the
+         * transport stops the loop. */
+        uint16_t ids[]={G_DENSITY,G_POS,LP_STRETCH,G_FREEZE,
                         fw_get((uint8_t *)app+0xe48,0x35)?0x34:0x33,0x39,LP_ECHO,0x36,
-                        LP_REC,LP_CLEAR,LP_STOP,G_FREEZE};
+                        LP_REC,LP_CLEAR};
 #else
         static const uint16_t ids[]={G_POS,G_SIZE,G_DENSITY,0x4a,G_JITTER,0x39,0x3d,G_FREEZE,G_REVERSE};
 #endif
@@ -102,9 +105,7 @@ static void move(uint8_t *w,int x,int y,int h) {
 static void place(uint8_t *p,int slot) {
     if(p[P_COMPACT_OFF] || (uint16_t)(slot-0x14)>=2)return;
     int mode=slot==0x14?fx_mode((void *)0x300173d0u):-1;
-#ifndef PHRASE_LOOPER
     int gran=mode==1;
-#endif
     int x0=*(int *)(p+4),y0=*(int *)(p+8);
     for(int w=0;w<13;w++) {
         /* Tape has no FILT since exp.8: its later widgets use FILT's old
@@ -116,7 +117,8 @@ static void place(uint8_t *p,int slot) {
                 x=x0+(i<6?0:240);y=y0+45-44*(i&1);
             } else if(mode==4 && i==5){x=x0;y=y0+45;}
 #ifdef PHRASE_LOOPER
-            /* Looper: side buttons at the stock positions, as on the Delay page. */
+            /* Looper: Sync at the bottom right, REC and CLEAR on the left. */
+            else if(gran && i==3)x=x0+240;
             else if(i>=8 && i<12) {
 #else
             else if(gran && (i==7||i==8)){x=x0;y=y0+45-44*(i-7);}

@@ -499,7 +499,7 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
     if(stretch && p->stretch==2u && p->len>=PLX_G*4u)pl_search(x,buffer,p->len,2);
     float target=g->mode?1.f:0.f,fade=g->fade;
     float level_t=(float)g_clampi(g->position,0,1000)*.001f;
-    float dub_t=(float)g_clampi(g->jitter,0,1000)*.001f;
+    float dub_t=1.f;                       /* overdub at full level (no Dub knob) */
     float level=p->level,dub=p->dub,gain=p->gain;
     float dl=n?(level_t-level)/(float)n:0.f,dd=n?(dub_t-dub)/(float)n:0.f;
     uint32_t state=p->state,len=p->len,pos=p->pos;
