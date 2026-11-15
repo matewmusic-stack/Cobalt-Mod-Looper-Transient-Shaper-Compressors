@@ -340,15 +340,19 @@ if LOOPER:
  sys.path.insert(0,str(ROOT/'tools'));import looper_page
  page=looper_page.adapt(page,manifest)
 (ROOT/OUT['html']).write_text(page)
-# GitHub Pages: publish docs/ (each index.html is the same self-contained page).
-OUT['docs'].mkdir(parents=True,exist_ok=True)
-(OUT['docs']/'index.html').write_text(page)
-(ROOT/'docs'/'.nojekyll').write_text('')
+# GitHub Pages serves docs/ from main. The looper page there is the live
+# patcher, so a looper build only replaces it with PUBLISH=1; otherwise the
+# new page stays in patch_looper.html until it has been tried on hardware.
+if not LOOPER or os.environ.get('PUBLISH')=='1':
+ OUT['docs'].mkdir(parents=True,exist_ok=True)
+ (OUT['docs']/'index.html').write_text(page)
+ (ROOT/'docs'/'.nojekyll').write_text('')
+elif LOOPER:print('docs/looper/index.html (the live patcher) left unchanged: set PUBLISH=1 to publish this build')
 if LOOPER:
  # The looper image itself stays local (build/ is never committed).
  (ROOT/'build'/'BLUEBOX-looper.BIN').write_bytes(bytes(patched))
  (ROOT/'build'/'looper_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
- print('Built Cobalt v1.2.0 + FX1 Phrase Looper: build/BLUEBOX-looper.BIN, patch_looper.html, docs/looper/index.html')
+ print('Built Cobalt v1.2.0 + FX1 Phrase Looper: build/BLUEBOX-looper.BIN, patch_looper.html')
  print('SHA256:',manifest['patched_sha256'])
 else:print('Built Cobalt v1.2.0 patcher. Expected output SHA256:',manifest['patched_sha256'])
 print('Added code bytes:',sum(len(base64.b64decode(p['new'])) for p in patches if p['name'].endswith('code')))
