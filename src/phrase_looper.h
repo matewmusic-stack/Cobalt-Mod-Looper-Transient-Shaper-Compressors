@@ -118,15 +118,17 @@ static inline int32_t pl_mod(int32_t a,int32_t b) {int32_t m=a%b;return m<0?m+b:
 /* Tempo-follow state, kept in SDRAM just after the loop audio (PLX_BYTES):
  * backup SRAM has no room left. Rebuilt whenever its magic is wrong. */
 #define PLX_MAGIC 0x504c5853u
-#define PLX_BYTES 64u
-#define PLT_BYTES 128u            /* after the loop audio: stretch state, then sync state */
+#define PLX_BYTES 96u
+#define PLT_BYTES 160u            /* after the loop audio: stretch state, then sync state */
 #define PLX_G 2048u               /* keep pitch: grain length, 42.7 ms */
 #define PLX_H (PLX_G/2u)          /* hop: two Hann grains overlap and sum to 1 */
 #define PLX_D 240                 /* WSOLA search range, +/-5 ms */
 #define PLX_L 256u                /* WSOLA match length */
 struct pl_stretch {
     uint32_t magic;
-    float src;                    /* fractional read position in the loop */
+    uint32_t srci;                /* read position in the loop: whole samples */
+    float srcf;                   /* + fraction 0..1 (a single float position loses
+                                   * up to 0.4% of the rate above 65536 samples) */
     float rate;                   /* playback rate now: current BPM / recorded BPM */
     uint32_t start[2],age[2];     /* keep pitch: grain source start and age */
     uint32_t hop;                 /* samples until the next grain */
@@ -137,6 +139,8 @@ struct pl_stretch {
     int32_t idx,best,cbest;       /* candidate index, best offset, coarse best */
     float best_v;
 };
+_Static_assert(sizeof(struct pl_stretch)<=PLX_BYTES,"stretch state fits PLX_BYTES");
+_Static_assert(sizeof(struct pl_sync)<=PLT_BYTES-PLX_BYTES,"sync state fits after the stretch state");
 #define PL_PRESS_REC 1u
 #define PL_PRESS_STOP 2u
 #define PL_PRESS_CLEAR 4u
@@ -238,8 +242,10 @@ static inline void pl_close(struct phrase_looper *p,int16_t *buffer,uint32_t nex
 static inline void pl_qstart(struct phrase_looper *p,const struct granular *g,struct pl_sync *s,uint32_t bpm_x100,int32_t barline) {
     int bars=g->density<1?1:g->density>2?2:g->density;
     float r=s->r>0.f?s->r:(float)bpm_x100*(1.f/300000.f);
-    uint32_t est=(uint32_t)((float)(bars*PLQ_BAR)/r)+1u;
-    if(est>p->cap && bars>1){bars=1;est=(uint32_t)((float)PLQ_BAR/r)+1u;}
+    uint32_t est=(uint32_t)((float)(bars*PLQ_BAR)/r+.5f);
+    /* 2 bars fit if they need no more than the buffer plus 1% (a sequencer a
+     * little slower than the stated tempo); the take then ends at the buffer. */
+    if(est>p->cap+p->cap/100u && bars>1){bars=1;est=(uint32_t)((float)PLQ_BAR/r+.5f);}
     p->bars=(uint32_t)bars;p->bpm_x100=bpm_x100;
     p->len=est<p->cap?est:p->cap;           /* estimate, for the title; the bar line ends it */
     p->pos=0;p->state=PL_REC;
@@ -330,7 +336,7 @@ static inline float pl_match(const int16_t *b,uint32_t len,uint32_t ia,uint32_t 
 #define PLX_COARSE 31
 #define PLX_CAND (PLX_COARSE+15)
 static inline void pl_search_begin(struct pl_stretch *x,uint32_t len,uint32_t start) {
-    x->a_next=pl_wrap((int32_t)(x->src+x->rate*(float)PLX_H),len);
+    x->a_next=pl_wrap((int32_t)x->srci+(int32_t)(x->srcf+x->rate*(float)PLX_H),len);
     x->cont=pl_wrap((int32_t)start+(int32_t)PLX_H,len);
     x->idx=0;x->best=0;x->cbest=0;x->best_v=-1e30f;
 }
@@ -350,15 +356,15 @@ static inline void pl_search(struct pl_stretch *x,const int16_t *b,uint32_t len,
     }
 }
 static inline void pl_x_reset(struct pl_stretch *x,uint32_t pos) {
-    x->src=(float)pos;x->age[0]=x->age[1]=PLX_G;x->hop=0;x->next=0;x->last=pos;
+    x->srci=pos;x->srcf=0.f;x->age[0]=x->age[1]=PLX_G;x->hop=0;x->next=0;x->last=pos;
     x->idx=0;x->best=0;x->cbest=0;x->best_v=-1e30f;x->a_next=x->cont=pos;
 }
 /* One frame of a stretched loop at x->src, advancing by x->rate. */
 static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16_t *b,uint32_t len,float *l,float *r) {
     if(p->stretch==1u || len<PLX_G*4u) {
         /* Varispeed: 4-point cubic Hermite interpolation. */
-        uint32_t i1=(uint32_t)x->src;if(i1>=len)i1=0;
-        float f=x->src-(float)i1;
+        uint32_t i1=x->srci;if(i1>=len)i1=0;
+        float f=x->srcf;
         uint32_t i0=i1?i1-1u:len-1u,i2=i1+1u<len?i1+1u:0u,i3=i2+1u<len?i2+1u:0u;
         for(unsigned c=0;c<2;c++) {
             float y0=pl_f(b[2u*i0+c]),y1=pl_f(b[2u*i1+c]),y2=pl_f(b[2u*i2+c]),y3=pl_f(b[2u*i3+c]);
@@ -369,7 +375,7 @@ static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16
     } else {
         /* Keep pitch: two Hann grains at speed 1, one started every PLX_H. */
         if(!x->hop) {
-            uint32_t a=(uint32_t)x->src;if(a>=len)a=0;
+            uint32_t a=x->srci;if(a>=len)a=0;
             /* Offset from the search over the last hop (none for the first grain). */
             uint32_t s=x->age[x->next^1u]<PLX_G && x->idx>0?pl_wrap((int32_t)a+x->best,len):a;
             x->start[x->next]=s;x->age[x->next]=0;x->last=s;x->next^=1u;x->hop=PLX_H;
@@ -385,8 +391,9 @@ static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16
         }
         *l=sl;*r=sr;
     }
-    x->src+=x->rate;
-    if(x->src>=(float)len)x->src-=(float)len;
+    x->srcf+=x->rate;
+    if(x->srcf>=1.f){uint32_t k=(uint32_t)x->srcf;x->srci+=k;x->srcf-=(float)k;}
+    while(x->srci>=len)x->srci-=len;
 }
 
 /* Once per block: the bluebox's song position. Returns 1 when the sequencer
@@ -426,7 +433,7 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
      * now, as REC does while stopped (with Sync on, wait for the start). */
     if(p->state==PL_ARMED && !run && !g->freeze){pl_start_capture(p,g,bpm_x100);s->flags&=~(PLS_LOCKED|PLS_QREC);}
     unsigned stretch=p->stretch && p->len;
-    if(stretch && (uint32_t)x->src!=p->pos)pl_x_reset(x,p->pos);  /* controls moved the loop */
+    if(stretch && x->srci!=p->pos)pl_x_reset(x,p->pos);  /* controls moved the loop */
     float rate_t=1.f;
     if(stretch && p->bpm_x100) {
         rate_t=(float)bpm_x100/(float)p->bpm_x100;
@@ -464,7 +471,13 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
                 buffer[2u*pos+1u]=pl_q(in_r[i]);
                 pos++;
                 if(s->flags&PLS_QREC) {
-                    if(pos>=p->cap)done=1;                              /* buffer full: free loop */
+                    if(pos>=p->cap) {
+                        /* Buffer full. Within the last 1% of the take (the
+                         * sequencer a little slow) it still closes locked;
+                         * otherwise it becomes a free loop. */
+                        done=1;
+                        locked=run && (uint32_t)(s->end-s->qi)<=(uint32_t)(s->end-s->start)/100u;
+                    }
                     else if(pos>=len)len=pos+1u<p->cap?pos+1u:p->cap;   /* estimate grows */
                 } else if(pos>=len)done=1;
             }
@@ -502,19 +515,19 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
                 } else {
                     /* Vari / Keep: the whole loop spans one cycle of the song. */
                     s->cycle=cyc;
-                    x->src=phi*k;if(x->src>=(float)len)x->src-=(float)len;
+                    {float v=phi*k;if(v>=(float)len)v-=(float)len;if(v<0.f)v=0.f;x->srci=(uint32_t)v;x->srcf=v-(float)x->srci;}
                     x->rate=s->r*k;
-                    uint32_t w=(uint32_t)x->src;if(w>=len)w=0;
+                    uint32_t w=x->srci;if(w>=len)w=0;
                     pl_x_frame(p,x,buffer,len,&l,&r);
                     if(state==PL_DUB && dub>0.f){int16_t *q=buffer+2u*w;q[0]=pl_q(pl_f(q[0])+in_l[i]*dub);q[1]=pl_q(pl_f(q[1])+in_r[i]*dub);}
-                    pos=(uint32_t)x->src;if(pos>=len)pos=0;
+                    pos=x->srci;if(pos>=len)pos=0;
                 }
             } else if(stretch) {
                 x->rate+=drate;
-                uint32_t w=(uint32_t)x->src;if(w>=len)w=0;
+                uint32_t w=x->srci;if(w>=len)w=0;
                 pl_x_frame(p,x,buffer,len,&l,&r);
                 if(state==PL_DUB && dub>0.f){int16_t *q=buffer+2u*w;q[0]=pl_q(pl_f(q[0])+in_l[i]*dub);q[1]=pl_q(pl_f(q[1])+in_r[i]*dub);}
-                pos=(uint32_t)x->src;if(pos>=len)pos=0;
+                pos=x->srci;if(pos>=len)pos=0;
             } else {
                 int16_t *q=buffer+2u*pos;
                 l=pl_f(q[0]);r=pl_f(q[1]);

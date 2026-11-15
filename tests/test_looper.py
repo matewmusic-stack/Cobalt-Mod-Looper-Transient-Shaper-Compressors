@@ -24,7 +24,7 @@ MODE,LEVEL,CLEAR,BARS,DUB,SYNC,REC,STOP=0x1a0,0x1a1,0x1a2,0x1a3,0x1a4,0x1a5,0x1a
 MUTE,FX1SEND=0x160,0xda
 EMPTY,ARMED,RECORDING,PLAYING,STOPPED,DUBBING=range(6)
 PL_MAGIC=0x504c4f32;PL_CAP_MAX=384000;PL_BYTES=PL_CAP_MAX*4;G_BYTES=768000;G_FRAMES=G_BYTES//4;RESERVE=4<<20
-XB=64   # tempo-follow state kept after the loop audio (PLX_BYTES)
+XB=160  # stretch + sync state kept after the loop audio (PLT_BYTES)
 # Loop audio is 16-bit stereo, +/-2.0 full scale: frame k is 4 bytes at ptr+4k.
 def q16(u,a,n):return struct.unpack('<%dh'%(2*n),u.mem_read(a,4*n))
 S4=M['symbols']['4'];C4=M['symbols']['cue4'];PC=M['symbols']['pcm4']
@@ -62,8 +62,17 @@ def tempo(u,raw_bpm,playing,muted=None):
  u.mem_write(TEMPO,struct.pack('<IiIIIIII',0x504c5431,raw_bpm,playing,0,0,0,m,0))
 def inp(k):return signal(.5,k,431),signal(.3,k,733)
 K=[0]
+# Simulated sequencer: the song position (960 ticks per beat) in the engine
+# object the firmware reads (*(0x3000a894)+0x78b0 with the app flag +0x7408
+# set), written before each audio block and advanced at SEQ['bpm'].
+SEQ={'on':False,'t':0.0,'bpm':120.0,'engine':0}
+def seq_write(u):
+ if SEQ['engine']:w32(u,SEQ['engine']+0x78b0,int(SEQ['t'])&0xffffffff);w32(u,SEQ['engine']+0x78b4,0)
 def step(u,evs=()):
- l,r=inp(K[0]);out,_=dblock(u,l,r,evs);K[0]+=1;return struct.unpack('<64f',out)
+ seq_write(u)
+ l,r=inp(K[0]);out,_=dblock(u,l,r,evs);K[0]+=1
+ if SEQ['on']:SEQ['t']+=32*SEQ['bpm']*960/(60*48000)
+ return struct.unpack('<64f',out)
 def run(u,n):
  for _ in range(n):o=step(u)
  return o
@@ -106,7 +115,8 @@ i=sizes.index(PL_BYTES+XB)
 check(len(sizes)>i+1,'FX2 Shoegaze still allocates after the looper buffer')
 cursor=[a for a,s in allocs if s==PL_BYTES+XB][0]
 u2,a2=lsetup(limit=cursor+PL_BYTES+XB+RESERVE-1)
-check(PL_BYTES+32 in [s for a,s in a2] and pl(u2)['cap']==(PL_BYTES-32)//4,'less room: the looper takes what fits while 4 MB stay free (%d bytes)'%(PL_BYTES-32))
+SZ=(PL_BYTES+XB-1)&~31
+check(SZ in [s for a,s in a2] and pl(u2)['cap']==(SZ-XB)//4,'less room: the looper takes what fits while 4 MB stay free (%d bytes)'%SZ)
 u2,a2=lsetup(limit=cursor+G_BYTES+XB+RESERVE)
 check(G_BYTES+XB in [s for a,s in a2] and pl(u2)['cap']==G_FRAMES and pl(u2)['free_kb']==(G_BYTES+XB+RESERVE)//1024,'no room above the reserve: the tested %d-byte buffer, 4 s of 16-bit stereo'%G_BYTES)
 tempo(u2,120,0,0);K[0]=0
@@ -213,25 +223,52 @@ step(u,press(CLEAR))
 
 # ======================== sync: real M4 tempo publisher feeds the M7 looper
 ENGINE=0x24010000;NOW=0x3001eb3c
-w32(u,0x3000a894,ENGINE)
+w32(u,0x3000a894,ENGINE);u.mem_write(0x300173d0+0x7408,b'\x01')   # app flag: header reads +0x78b0
+SEQ.update(engine=ENGINE,on=False,t=0.0)
 call(u,0x8120264,SESSION+0xe68,0x85,120)
-def m4_tick(now,pos):
- w32(u,NOW,now);w32(u,ENGINE+0x78b0,pos);w32(u,ENGINE+0x78b8,0)
+def m4_tick(now,pos=None):
+ w32(u,NOW,now)
+ if pos is not None:w32(u,ENGINE+0x78b0,pos);w32(u,ENGINE+0x78b8,0)
  call(u,C4['cue_ui_tick'],0x24060000,0x24060100)
+def sync_state():
+ v=struct.unpack('<IIiiffiiIIii',u.mem_read(ptr+pl(u)['cap']*4+96,48))
+ return dict(zip(['magic','still','last','qi','qf','r','start','end','lt','flags','bar','cycle'],v))
 u.mem_write(TEMPO,bytes(32));m4_tick(5000,0)
 t=struct.unpack('<IiII',u.mem_read(TEMPO,16))
 check(t[0]==0x504c5431 and t[1]==120 and t[2]==0,'M4 publishes the real project BPM setting (120, stored as plain BPM) and a stopped sequencer')
+run(u,70)                                         # stopped long enough to register
 step(u,[(BARS,2),(SYNC,1)]);step(u,press(REC))
 check(pl(u)['state']==ARMED and title(u)=='ARMED','Sync on, sequencer stopped: REC arms; title ARMED')
 step(u,press(REC));check(pl(u)['state']==EMPTY,'REC again cancels the armed take')
 step(u,press(REC))
-for n in range(30):m4_tick(5010+n,0);o=step(u)
+for n in range(30):m4_tick(5010+n);o=step(u)
 check(pl(u)['state']==ARMED and all(x==0. for x in o),'armed looper waits silently')
-m4_tick(5100,32);o=step(u);p=pl(u)
-check(p['state']==RECORDING and p['pos']==32 and p['len']==192000 and p['bars']==2,'sequencer start begins a 2-bar take at 120 BPM')
+SEQ.update(on=True,t=0.0)                          # sequencer starts at bar 1
+k=0
+while pl(u)['state']==ARMED and k<8:step(u);k+=1
+p=pl(u);sy=sync_state()
+check(p['state']==RECORDING and p['bars']==2 and sy['start']==0 and k<=2,'sequencer start begins a 2-bar take on bar 1, within %d blocks'%k)
+m4_tick(5100,int(SEQ['t']))
+check(struct.unpack('<I',u.mem_read(TEMPO+8,4))[0]==1,'M4 sees the sequencer playing')
 run(u,2000);check(title(u)=='REC 1/2','title counts bars while recording (REC 1/2)')
 run(u,2000);check(title(u)=='REC 2/2','... and REC 2/2')
+while pl(u)['state']==RECORDING and k<20000:step(u);k+=1
+p=pl(u);sy=sync_state()
+# A start is seen when the position first moves, one block after the downbeat:
+# such a take begins up to ~1 ms late (a bar-line take armed while running is exact).
+check(p['state']==PLAYING and sy['flags']&2 and sy['lt']==7680 and 192000-64<=p['len']<=192000,'the take closes on bar 3: 2 bars of song time less the start-detection delay, %d samples (2 bars = 192000), locked'%p['len'])
+# REC while running mid-bar waits for the next bar line
 step(u,press(CLEAR));step(u,[(SYNC,0)])
+SEQ['t']+=1000.0
+for _ in range(3):step(u)
+step(u,press(REC))
+check(pl(u)['state']==ARMED,'sequencer running mid-bar, Sync off: REC still waits for the bar line')
+k=0
+while pl(u)['state']==ARMED and k<4000:step(u);k+=1
+sy=sync_state()
+check(pl(u)['state']==RECORDING and sy['start']%3840==0 and sy['start']>SEQ['t']-32*0.04*3,'... and starts on it (tick %d)'%sy['start'])
+step(u,press(CLEAR))
+SEQ['on']=False;run(u,70)                          # stop; let the stop register
 
 # ================================================== Stretch switch (M7 side)
 for v,name in [(1,'Vari'),(2,'Keep'),(9,'Keep (clamped)'),(0,'Off')]:

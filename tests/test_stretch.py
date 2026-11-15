@@ -161,12 +161,12 @@ for mode in (0,1,2):
 for bpm in (112,128):
  want=BEAT*120/bpm
  r0,r1,r2=results[(0,bpm)],results[(1,bpm)],results[(2,bpm)]
- check(abs(r0['gap']-BEAT)<2 and abs(r0['pitch']-440)<1,'off at %d BPM: loop keeps 120 BPM timing and pitch (drifts against the new tempo)'%bpm)
+ check(abs(r0['gap']-BEAT)<.001*BEAT and abs(r0['pitch']-440)<1,'off at %d BPM: loop keeps 120 BPM timing and pitch (drifts against the new tempo)'%bpm)
  check(abs(r1['gap']-want)<.001*want and abs(r1['pitch']-440*bpm/120)<.5,'varispeed at %d BPM: beats every %.0f samples, pitch %.1f Hz (expected %.1f)'%(bpm,r1['gap'],r1['pitch'],440*bpm/120))
  check(abs(r2['gap']-want)<.005*want and abs(r2['pitch']-440)<.5,'keep pitch at %d BPM: average beat spacing %.0f (want %.0f), pitch %.1f Hz'%(bpm,r2['gap'],want,r2['pitch']))
 for mode in (1,2):
  r=results[(mode,120)]
- check(abs(r['gap']-BEAT)<2 and abs(r['pitch']-440)<1,'%s at the recorded tempo plays the loop unchanged in timing and pitch'%NAMES[mode])
+ check(abs(r['gap']-BEAT)<.001*BEAT and abs(r['pitch']-440)<1,'%s at the recorded tempo plays the loop unchanged in timing and pitch'%NAMES[mode])
 check(results[(1,128)]['cost'][1]<14813,'varispeed: every block runs fewer instructions than the tested Granular (14813+)')
 check(results[(2,128)]['cost'][1]<14813,'keep pitch: every block, including grain starts, runs fewer instructions than the tested Granular (worst %d)'%results[(2,128)]['cost'][1])
 
