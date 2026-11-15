@@ -13,7 +13,7 @@ GUIDE = '''<section id="looper"><h2>Using the Phrase Looper</h2>
 <tr><th>STOP</th><td>Stop. Press again to play from the start. Stopping during a take keeps it.</td></tr>
 <tr><th>CLEAR</th><td>Empty the loop.</td></tr>
 <tr><th>Sync</th><td>On: with the sequencer stopped, REC waits and recording starts when you press start.</td></tr>
-<tr><th>Bars</th><td>1 or 2 bars at the project BPM.</td></tr>
+<tr><th>Bars</th><td>1 or 2 bars at the current tempo: the incoming MIDI clock when there is one, otherwise the project BPM.</td></tr>
 <tr><th>Level</th><td>Loop volume. The FX1 return carries only the loop.</td></tr>
 <tr><th>Dub</th><td>How loud new playing is layered while overdubbing.</td></tr>
 <tr><th>Stretch</th><td>What the loop does when you change the project tempo after recording. <b>Off</b>: keeps its recorded speed (drifts against the new tempo). <b>Vari</b>: plays faster or slower to stay in time, and the pitch moves with it, like tape (&plusmn;8 BPM at 120 is about &plusmn;1 semitone). <b>Keep</b>: stays in time at the same pitch, with slight graininess on sustained notes.</td></tr>

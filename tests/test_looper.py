@@ -56,7 +56,7 @@ def lsetup(limit=0xc2000000,nan=True):
 def pl(u):
  a=struct.unpack('<8I',u.mem_read(PL,32));b=struct.unpack('<3bBIfffII',u.mem_read(PL+32,28))
  d=dict(zip(['magic','owner','cap','state','len','pos','bars','seq'],a))
- d.update(last=b[:3],presses=b[3],transport=b[4],gain=b[5],level=b[6],dub=b[7],bpm_x10=b[8],free_kb=b[9]);return d
+ d.update(last=b[:3],presses=b[3],transport=b[4],gain=b[5],level=b[6],dub=b[7],bpm_x100=b[8],free_kb=b[9]);return d
 def tempo(u,raw_bpm,playing,muted=None):
  m=u32(u,TEMPO+24) if muted is None else muted
  u.mem_write(TEMPO,struct.pack('<IiIIIIII',0x504c5431,raw_bpm,playing,0,0,0,m,0))
@@ -253,6 +253,24 @@ call(u,S4['dly_tools_version'],0x24050000,0x24050200);u.hook_del(h)
 fr=pl(u)['free_kb']*10//1024
 want='Cblt L8.0s F%d.%dM'%(fr//10,fr%10)
 check(texts[-1]==want,'TOOLS shows the longest loop and the free SDRAM: %s'%texts[-1])
+
+# ============================================ MIDI clock tempo (M4 -> M7)
+def clock_line(raw,clock_x100,clock_at=0):
+ u.mem_write(TEMPO,struct.pack('<IiIIIIII',0x504c5431,raw,0,clock_at,0,0,0,clock_x100))
+for clk,want in [(10000,115200),(9873,1152000000//9873),(25000,46080)]:
+ step(u,press(CLEAR)+[(BARS,1)]);clock_line(120,clk);step(u,press(REC))
+ check(pl(u)['len']==want and pl(u)['bpm_x100']==clk,'project at 120 BPM, MIDI clock at %.2f BPM: the take follows the clock (%d frames)'%(clk/100,want))
+step(u,press(CLEAR));clock_line(120,1500);step(u,press(REC))
+check(pl(u)['len']==96000,'an out-of-range clock tempo (15 BPM) is ignored: project BPM is used')
+# The real UI tick drops the clock tempo 300 ms after the last tick.
+call(u,0x8120264,SESSION+0xe68,0x85,120)
+clock_line(120,10000,clock_at=7000);m4_tick(7300,0)
+check(struct.unpack('<I',u.mem_read(TEMPO+28,4))[0]==10000,'clock tempo kept 300 ms after the last tick')
+m4_tick(7301,0)
+check(struct.unpack('<I',u.mem_read(TEMPO+28,4))[0]==0,'clock tempo dropped once ticks stop for more than 300 ms')
+step(u,press(CLEAR));step(u,press(REC))
+check(pl(u)['len']==96000,'without clock the next take uses the project BPM again')
+step(u,press(CLEAR));tempo(u,120,0)
 
 # ======================================================== CPU (relative)
 step(u,press(CLEAR));tempo(u,240,1)

@@ -115,7 +115,7 @@ void cue_present(void *display,int layer,int a2,int a3) {
 static void pl_tempo_publish(void) {
     volatile struct pl_tempo *t=PL_TEMPO;
     uint32_t now=PL_NOW;
-    if(t->magic!=PL_TEMPO_MAGIC){t->raw_bpm=0;t->playing=0;t->seq=0;t->pos=0;t->moved=now-1000u;t->muted=0;}
+    if(t->magic!=PL_TEMPO_MAGIC){t->raw_bpm=0;t->playing=0;t->clock_at=now-1000u;t->pos=0;t->moved=now-1000u;t->muted=0;t->clock_x100=0;}
     uint8_t *table=PL_SESSION+0xe68u;
     if(*(void *const *)(table+4))t->raw_bpm=((int (*)(void *,unsigned))0x08120235u)(table,0x85u);
     uint32_t e=PL_ENGINE,playing=0;
@@ -125,7 +125,8 @@ static void pl_tempo_publish(void) {
         playing=now-t->moved<100u;
     }
     t->playing=playing;
-    t->seq++;
+    /* MIDI clock tempo (measured in pc_m4.c): gone after 300 ms without a tick. */
+    if(now-t->clock_at>300u)t->clock_x100=0;
     t->magic=PL_TEMPO_MAGIC;
 }
 #endif

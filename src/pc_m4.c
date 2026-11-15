@@ -908,6 +908,11 @@ struct sc_bank {
     uint32_t mo_clk_usb;
     /* m7: Clock Src value last seen + 1 (0 before the first look), for the band */
     uint32_t mo_clk_seen;
+#ifdef PHRASE_LOOPER
+    /* Looper: MIDI clock tempo. Ticks of the clock owner (mo_next, TIM4 IRQ),
+     * the UI ms time of every 24th (one beat), and the smoothed result. */
+    uint32_t lp_ticks,lp_last,lp_idx,lp_n,lp_beat[9],lp_x100;
+#endif
 };
 struct sc_ptr {uint32_t magic;struct sc_bank *bank;};
 #define SC_PTR ((volatile struct sc_ptr *)0x38800fd0u)
@@ -970,6 +975,9 @@ static void sc_boot(void) {
     b->scroll_key=0;b->scroll_at=0;b->scroll_off=0;
     b->mo_attached=0;b->mo_loading=0;b->mo_pending=0;b->mo_at=0;b->mo_flip=0;b->mo_mark=0;b->mo_count=0;
     b->mo_dumping=0;b->mo_cursor=0;b->mo_busy_since=0;b->mo_din=0;b->mo_to=0;b->mo_clk_src=0;b->mo_clk_at=0;b->mo_clk_usb=0;b->mo_clk_seen=0;
+#ifdef PHRASE_LOOPER
+    b->lp_ticks=0;b->lp_last=0;b->lp_idx=0;b->lp_n=0;b->lp_x100=0;
+#endif
     b->magic=SC_MAGIC;
     p->bank=b;p->magic=SC_MAGIC;
 }
@@ -1385,6 +1393,35 @@ static int mo_clock_ok(struct sc_bank *b,unsigned from) {
     b->mo_clk_at=now;
     return 1;
 }
+#ifdef PHRASE_LOOPER
+/* One accepted MIDI clock tick (0xF8, 24 per beat) from the clock owner.
+ * Tempo = beats / time over up to the last 8 beats (about 4 s at 120 BPM),
+ * which averages out the 1 ms clock resolution and the poll jitter. When a
+ * single beat differs by more than 2% (a tempo change, far above the ~0.2%
+ * jitter of one beat), the window restarts from the previous beat so old
+ * beats do not hold the value back. Published in hundredths of a BPM. */
+void lp_clock(struct sc_bank *b) {
+    uint32_t now=PC_UI_NOW;
+    if(now-b->lp_last>300u){b->lp_ticks=0;b->lp_n=0;b->lp_idx=0;b->lp_x100=0;}
+    b->lp_last=now;
+    volatile struct pl_tempo *t=LP_TEMPO;
+    t->clock_at=now;
+    if(b->lp_ticks++%24u)return;
+    uint32_t prev=b->lp_n?b->lp_beat[(b->lp_idx+8u)%9u]:now;
+    b->lp_beat[b->lp_idx]=now;b->lp_idx=(b->lp_idx+1u)%9u;
+    if(b->lp_n<9u)b->lp_n++;
+    if(b->lp_n<2u)return;
+    uint32_t old=b->lp_x100,one=now-prev;
+    if(old && one) {
+        uint32_t x1=(6000000u+one/2u)/one;      /* this beat alone */
+        if(x1>old+old/50u || x1+old/50u<old)b->lp_n=2u;   /* tempo change: restart window */
+    }
+    uint32_t beats=b->lp_n-1u,oldest=b->lp_beat[(b->lp_idx+9u-b->lp_n)%9u],dt=now-oldest;
+    if(!dt)return;
+    b->lp_x100=(6000000u*beats+dt/2u)/dt;      /* 60,000 ms x 100 per beat */
+    t->clock_x100=b->lp_x100;
+}
+#endif
 int mo_next(uint8_t *port,uint8_t *msg,uint8_t *src) {
     struct sc_bank *b=mo_irq_bank();
     for(;;){
@@ -1401,6 +1438,9 @@ int mo_next(uint8_t *port,uint8_t *msg,uint8_t *src) {
         }
         if(!b)return 1;
         if(msg[4] && mo_clock(msg[0]) && !mo_clock_ok(b,from))continue;
+#ifdef PHRASE_LOOPER
+        if(msg[4] && msg[0]==0xf8u)lp_clock(b);
+#endif
         mo_thru(b,msg,from>=3u);
         return 1;
     }

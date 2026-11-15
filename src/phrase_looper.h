@@ -46,7 +46,7 @@
 #define PL_BYTES (PL_CAP_MAX*PL_FRAME)
 #define PL_SCALE 16384.f          /* +/-2.0 <-> +/-32767 */
 #define PL_RESERVE (4u*1024u*1024u) /* SDRAM left free for later consumers */
-#define PL_DEFAULT_BPM_X10 1200u
+#define PL_DEFAULT_BPM_X100 12000u      /* tempos are in hundredths of a BPM */
 
 enum {PL_EMPTY=0,PL_ARMED,PL_REC,PL_PLAY,PL_STOP,PL_DUB};
 
@@ -55,10 +55,10 @@ struct pl_tempo {
     uint32_t magic;
     int32_t raw_bpm;              /* project setting 0x85 as stored */
     uint32_t playing;             /* sequencer position moved recently */
-    uint32_t seq;
+    uint32_t clock_at;            /* M4: UI ms of the last accepted MIDI clock tick */
     uint32_t pos,moved;           /* M4 bookkeeping */
     uint32_t muted;               /* M4: tracks the looper muted; bit 31 = applied */
-    uint32_t spare;
+    uint32_t clock_x100;          /* tempo measured from incoming MIDI clock; 0 = none */
 };
 
 /* M7 writes; the first 32 bytes (one cache line) are cleaned after every
@@ -76,7 +76,7 @@ struct phrase_looper {
     uint8_t presses;              /* bit 0 REC, 1 STOP, 2 CLEAR */
     uint32_t transport_seen;
     float gain,level,dub;         /* smoothed */
-    uint32_t bpm_x10;             /* tempo used for the current loop */
+    uint32_t bpm_x100;            /* tempo of the current loop, hundredths of a BPM */
     uint32_t free_kb;             /* arena free before the FX1 buffer (KiB), for TOOLS */
     uint32_t stretch;             /* 0 off, 1 varispeed, 2 keep pitch (experiment) */
 };
@@ -111,7 +111,7 @@ static inline void pl_reset(struct phrase_looper *p,void *owner,uint32_t cap) {
     for(unsigned i=0;i<sizeof(*p)/4;i++)w[i]=0;
     p->owner=owner;p->cap=cap;p->state=PL_EMPTY;
     p->last[0]=p->last[1]=p->last[2]=-1;
-    p->bpm_x10=PL_DEFAULT_BPM_X10;
+    p->bpm_x100=PL_DEFAULT_BPM_X100;
     p->magic=PL_MAGIC;
 }
 /* Forget button history (mode change, project load): next values latch. */
@@ -130,19 +130,25 @@ static inline void pl_event(struct phrase_looper *p,unsigned id,int value) {
     p->last[k]=(int8_t)v;
 }
 
-/* Accepts plain BPM, tenths or hundredths. 20..300 BPM is valid. */
-static inline uint32_t pl_bpm_x10(int32_t raw) {
-    if(raw>=20 && raw<=300)return (uint32_t)raw*10u;
-    if(raw>300 && raw<=3000)return (uint32_t)raw;
-    if(raw>3000 && raw<=30000)return (uint32_t)raw/10u;
-    return PL_DEFAULT_BPM_X10;
+/* Project BPM setting to hundredths. Accepts plain BPM, tenths or hundredths;
+ * 20..300 BPM is valid. */
+static inline uint32_t pl_bpm_x100(int32_t raw) {
+    if(raw>=20 && raw<=300)return (uint32_t)raw*100u;
+    if(raw>300 && raw<=3000)return (uint32_t)raw*10u;
+    if(raw>3000 && raw<=30000)return (uint32_t)raw;
+    return PL_DEFAULT_BPM_X100;
+}
+/* The looper's tempo: measured MIDI clock when present, else the project BPM. */
+static inline uint32_t pl_tempo_x100(int32_t raw_bpm,uint32_t clock_x100) {
+    if(clock_x100>=2000u && clock_x100<=30000u)return clock_x100;
+    return pl_bpm_x100(raw_bpm);
 }
 
 /* Frames for the requested bars, reduced to fit the buffer. */
-static inline uint32_t pl_length(uint32_t bpm_x10,int bars,uint32_t cap,uint32_t *used_bars) {
-    if(bpm_x10<200u)bpm_x10=200u;
-    if(bpm_x10>3000u)bpm_x10=3000u;
-    uint32_t bar=(PL_FS*60u*4u*10u)/bpm_x10;   /* 115,200,000/bpm_x10 */
+static inline uint32_t pl_length(uint32_t bpm_x100,int bars,uint32_t cap,uint32_t *used_bars) {
+    if(bpm_x100<2000u)bpm_x100=2000u;
+    if(bpm_x100>30000u)bpm_x100=30000u;
+    uint32_t bar=(PL_FS*60u*4u*100u)/bpm_x100; /* 1,152,000,000/bpm_x100 */
     if(bars<1)bars=1;
     if(bars>2)bars=2;
     uint32_t len=bar*(uint32_t)bars;
@@ -172,9 +178,9 @@ static inline void pl_seal(int16_t *buffer,uint32_t len) {
     }
 }
 
-static inline void pl_start_capture(struct phrase_looper *p,const struct granular *g,uint32_t bpm_x10) {
-    p->bpm_x10=bpm_x10;
-    p->len=pl_length(bpm_x10,g->density,p->cap,&p->bars);
+static inline void pl_start_capture(struct phrase_looper *p,const struct granular *g,uint32_t bpm_x100) {
+    p->bpm_x100=bpm_x100;
+    p->len=pl_length(bpm_x100,g->density,p->cap,&p->bars);
     p->pos=0;
     p->state=p->len>=PL_RAMP*4u?PL_REC:PL_EMPTY;
 }
@@ -187,7 +193,7 @@ static inline void pl_close(struct phrase_looper *p,int16_t *buffer,uint32_t nex
 }
 
 /* Button presses and Sync, once per block before rendering. */
-static inline void pl_controls(struct phrase_looper *p,const struct granular *g,uint32_t bpm_x10,uint32_t playing) {
+static inline void pl_controls(struct phrase_looper *p,const struct granular *g,uint32_t bpm_x100,uint32_t playing) {
     unsigned press=p->presses;p->presses=0;
     if(press&PL_PRESS_CLEAR){p->state=PL_EMPTY;p->len=p->pos=0;press=0;}
     if(press&PL_PRESS_STOP) {
@@ -204,7 +210,7 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
         switch(p->state) {
         case PL_EMPTY:
             if(g->freeze && !playing)p->state=PL_ARMED;
-            else pl_start_capture(p,g,bpm_x10);
+            else pl_start_capture(p,g,bpm_x100);
             break;
         case PL_ARMED:p->state=PL_EMPTY;break;
         case PL_REC:pl_close(p,(int16_t *)g->buffer,PL_PLAY);break;
@@ -214,7 +220,7 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
         default:break;
         }
     }
-    if(p->state==PL_ARMED && playing && !p->transport_seen)pl_start_capture(p,g,bpm_x10);
+    if(p->state==PL_ARMED && playing && !p->transport_seen)pl_start_capture(p,g,bpm_x100);
     p->transport_seen=playing;
 }
 
@@ -322,18 +328,18 @@ static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16
     if(x->src>=(float)len)x->src-=(float)len;
 }
 
-static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
+static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t bpm_x100,uint32_t playing,
                              const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n) {
     int16_t *buffer=(int16_t *)g->buffer;
     if(!buffer)return;
-    pl_controls(p,g,bpm_x10,playing);
+    pl_controls(p,g,bpm_x100,playing);
     struct pl_stretch *x=(struct pl_stretch *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME);
     if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->magic=PLX_MAGIC;}
     unsigned stretch=p->stretch && p->len;
     if(stretch && (uint32_t)x->src!=p->pos)pl_x_reset(x,p->pos);  /* controls moved the loop */
     float rate_t=1.f;
-    if(stretch && p->bpm_x10) {
-        rate_t=(float)bpm_x10/(float)p->bpm_x10;
+    if(stretch && p->bpm_x100) {
+        rate_t=(float)bpm_x100/(float)p->bpm_x100;
         if(rate_t<.5f)rate_t=.5f;
         if(rate_t>2.f)rate_t=2.f;
     }

@@ -18,7 +18,7 @@ void x_reverse_o2(struct delay_types *x,struct granular *g,float *l,float *r,uns
 void x_reverse_input_o2(struct delay_types *x,struct granular *g,float *l,float *r,unsigned n);
 #ifdef PHRASE_LOOPER
 #include "phrase_looper.h"
-void pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
+void pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x100,uint32_t playing,
                   const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n);
 /* Free backup SRAM after the delay state (0xd00..0xe5b), below the CPU
  * meter at 0xf00. 0xea0..0xedf: M7 looper state. 0xee0..0xeff: tempo
@@ -28,17 +28,17 @@ void pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,ui
 _Static_assert(sizeof(struct phrase_looper)==64,"looper state fills 0xea0..0xedf");
 _Static_assert(__builtin_offsetof(struct phrase_looper,last)==32,"M4-visible looper fields fill the first cache line");
 _Static_assert(sizeof(struct pl_tempo)==32,"tempo line is one cache line");
-static void pl_tempo_read(uint32_t *bpm_x10,uint32_t *playing) {
+static void pl_tempo_read(uint32_t *bpm_x100,uint32_t *playing) {
     /* The M4 has no D-cache and writes this line directly to SRAM; drop any
      * stale copy in the M7 D-cache first. The M7 never writes this line. */
     __asm volatile("dsb" ::: "memory");
     *(volatile uint32_t *)0xe000ef5cu=(uint32_t)PL_TEMPO; /* SCB DCIMVAC */
     __asm volatile("dsb\nisb" ::: "memory");
     if(PL_TEMPO->magic==PL_TEMPO_MAGIC) {
-        *bpm_x10=pl_bpm_x10(PL_TEMPO->raw_bpm);
+        *bpm_x100=pl_tempo_x100(PL_TEMPO->raw_bpm,PL_TEMPO->clock_x100);
         *playing=PL_TEMPO->playing!=0;
     } else {
-        *bpm_x10=PL_DEFAULT_BPM_X10;
+        *bpm_x100=PL_DEFAULT_BPM_X100;
         *playing=0;
     }
 }
@@ -390,10 +390,10 @@ unsigned dly_process(uint8_t *obj, void *ctx)
         if(GS->mode || GS->fade>0.f) {
             fw_stereo(bus,&l,&r);
 #ifdef PHRASE_LOOPER
-            uint32_t bpm_x10,playing;
-            pl_tempo_read(&bpm_x10,&playing);
+            uint32_t bpm_x100,playing;
+            pl_tempo_read(&bpm_x100,&playing);
             if(PL->magic!=PL_MAGIC || PL->owner!=obj)pl_reset(PL,obj,G_BYTES/PL_FRAME);
-            pl_render_o2(PL,GS,bpm_x10,playing,input[0],input[1],l,r,n);
+            pl_render_o2(PL,GS,bpm_x100,playing,input[0],input[1],l,r,n);
             pl_publish();
 #else
             g_render_o2(GS,input[0],input[1],l,r,n);

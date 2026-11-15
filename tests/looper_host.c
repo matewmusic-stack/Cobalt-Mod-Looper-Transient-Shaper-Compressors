@@ -19,7 +19,7 @@ static uint32_t sample;
 static float input_at(uint32_t i) {return (float)(i%1000u)*.001f;}
 static void block(uint32_t bpm_x10,uint32_t playing) {
     for(unsigned i=0;i<N;i++){in_l[i]=input_at(sample+i);in_r[i]=-in_l[i];out_l[i]=out_r[i]=9.f;}
-    pl_render(&p,&g,bpm_x10,playing,in_l,in_r,out_l,out_r,N);
+    pl_render(&p,&g,bpm_x10*10u,playing,in_l,in_r,out_l,out_r,N);   /* the looper takes hundredths */
     sample+=N;
 }
 static void run(uint32_t frames,uint32_t bpm_x10,uint32_t playing) {for(uint32_t f=0;f<frames;f+=N)block(bpm_x10,playing);}
@@ -36,13 +36,15 @@ static void setup(uint32_t cap) {
 }
 
 int main(void) {
-    CHECK(pl_bpm_x10(120)==1200 && pl_bpm_x10(1200)==1200 && pl_bpm_x10(12000)==1200 && pl_bpm_x10(0)==PL_DEFAULT_BPM_X10,"tempo parsing");
+    CHECK(pl_bpm_x100(120)==12000 && pl_bpm_x100(1200)==12000 && pl_bpm_x100(12000)==12000 && pl_bpm_x100(0)==PL_DEFAULT_BPM_X100,"tempo parsing");
+    CHECK(pl_tempo_x100(120,0)==12000 && pl_tempo_x100(120,9873)==9873 && pl_tempo_x100(120,1999)==12000 && pl_tempo_x100(120,30001)==12000,"MIDI clock tempo wins over the project BPM when valid");
+    CHECK(pl_length(9873,1,PL_CAP_MAX,0)==1152000000u/9873u,"loop length from a fractional clock tempo (98.73 BPM)");
     uint32_t bars=0;
-    CHECK(pl_length(1200,2,PL_CAP_MAX,&bars)==192000u && bars==2,"2 bars @120");
-    CHECK(pl_length(600,2,PL_CAP_MAX,&bars)==384000u && bars==2,"2 bars @60 fill the cap");
-    CHECK(pl_length(400,2,PL_CAP_MAX,&bars)==288000u && bars==1,"too long: 1 bar");
-    CHECK(pl_length(1200,2,G_BYTES/PL_FRAME,&bars)==192000u && bars==2,"tested 768 KB buffer holds 2 bars at 120 BPM in 16-bit");
-    CHECK(pl_length(1000,2,G_BYTES/PL_FRAME,&bars)==115200u && bars==1,"... and 1 bar at 100 BPM");
+    CHECK(pl_length(12000,2,PL_CAP_MAX,&bars)==192000u && bars==2,"2 bars @120");
+    CHECK(pl_length(6000,2,PL_CAP_MAX,&bars)==384000u && bars==2,"2 bars @60 fill the cap");
+    CHECK(pl_length(4000,2,PL_CAP_MAX,&bars)==288000u && bars==1,"too long: 1 bar");
+    CHECK(pl_length(12000,2,G_BYTES/PL_FRAME,&bars)==192000u && bars==2,"tested 768 KB buffer holds 2 bars at 120 BPM in 16-bit");
+    CHECK(pl_length(10000,2,G_BYTES/PL_FRAME,&bars)==115200u && bars==1,"... and 1 bar at 100 BPM");
     CHECK(pl_q(1.f)==16384 && pl_q(-2.5f)==-32767 && pl_q(2.5f)==32767 && pl_q(0.f/0.f)==-32767 && pl_f(pl_q(.123f))-.123f<1.f/PL_SCALE,"16-bit conversion: scale, saturation, rounding");
     CHECK(g.position==0,"static zero before setup");
 

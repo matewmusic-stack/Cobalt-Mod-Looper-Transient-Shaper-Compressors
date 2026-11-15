@@ -291,4 +291,32 @@ check(u32(u,TOAST)==(8<<8|5),'MIDI output that never sends: toast MAP CC SYNC: M
 uart_ok[0]=1
 for _ in range(10):usb()
 setmap(MAPPED);setting(0x293,1)
+
+if LOOPER_BUILD:
+ # Phrase Looper: tempo measured from the MIDI clock the owner input sends,
+ # through the real mo_next path (Clock Src filter included).
+ TEMPO=0x38800ee0
+ def tline():return struct.unpack('<IiIIIIII',u.mem_read(TEMPO,32))
+ u.mem_write(TEMPO,struct.pack('<IiIIIIII',0x504c5431,120,0,0,0,0,0,0))
+ def ticks(n,bpm,t0):
+  t=t0
+  for k in range(n):
+   w32(u,NOW,int(round(t)));din_in([0xf8]);got();t+=60000.0/bpm/24.0
+  return t
+ t=ticks(24*10+1,100,2000000)
+ check(tline()[7]==10000,'MIDI in clock at 100 BPM measures 100.00 BPM (%d)'%tline()[7])
+ t=ticks(24*10,128,t)
+ check(abs(tline()[7]-12800)<=6,'clock changing to 128 BPM measures %.2f BPM (within 0.05%%)'%(tline()[7]/100))
+ t=ticks(24*10,98.73,t)
+ check(abs(tline()[7]-9873)<=5,'fractional 98.73 BPM measures %.2f BPM (within 0.05%%)'%(tline()[7]/100))
+ check(tline()[3]==int(round(t-60000.0/98.73/24.0)),'last accepted tick time is published for the 300 ms timeout')
+ host_in(F8);got()
+ check(abs(tline()[7]-9873)<=5,'clock from a lower-ranked input (dropped by Clock Src) does not disturb the measurement')
+ # jitter: +/-1 ms on every tick at 120 BPM must not restart the window or move the value much
+ import random
+ rnd=random.Random(3);t=2600000.0
+ for k in range(24*12+1):
+  w32(u,NOW,int(round(t))+rnd.choice((-1,0,1)));din_in([0xf8]);got();t+=60000.0/120/24
+ check(abs(tline()[7]-12000)<=6,'120 BPM clock with +/-1 ms jitter on every tick measures %.2f BPM'%(tline()[7]/100))
+
 print(H.checks,"checks passed")
