@@ -45,6 +45,10 @@ def adapt(page, manifest):
          'Generate a new BLUEBOX.BIN. Copy it to the root of the microSD card, hold <b>A</b> while powering the bluebox on, and let go when “Bluebox Installer” appears. TOOLS then shows <code>Cblt L…</code>.'),
         ('Unofficial firmware · Cobalt v' + v + '.', 'Unofficial, experimental firmware · Cobalt v' + v + ' + FX1 Phrase Looper.'),
         ('<section id="guide">', GUIDE + '<section id="guide">'),
+        ('<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup.</p>',
+         '<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup. '
+         '<b>The Phrase Looper build has been tested on one bluebox desktop only.</b> '
+         '<a href="https://github.com/matewmusic-stack/Cobalt-Phrase-Looper#hardware-testing-one-device">What was tested</a></p>'),
         # Theme preview: the FX1 mode list (B on the FX page).
         ("listRows(P,['Delay','Warp delay','Granular','Tape','Ducked','Reverse']",
          "listRows(P,['Delay','Warp delay','Phrase Looper','Tape','Ducked','Reverse']"),

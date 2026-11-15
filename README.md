@@ -394,6 +394,8 @@ BlueLex, with every desktop address and hook traced independently.
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
 ## Phrase Looper firmware (experimental build)
 
+> **Tested on one device only.** The Phrase Looper build has been installed and tried on a single bluebox desktop running firmware 1.5.2. It has not been tested on any other unit. See [Hardware testing](#hardware-testing-one-device) for what was checked. Keep the official firmware so you can go back.
+
 The looper is built as a separate firmware variant. The default build is unchanged: it still reproduces the released Cobalt 1.2.0 image (SHA-256 `c28981e5…`), and `patch_bluebox.html` and `docs/index.html` stay Cobalt-only.
 
 **Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)**, or open `patch_looper.html` (also `docs/looper/index.html`) in a browser, and drop in the original desktop 1.5.2 `BLUEBOX.BIN`. As with the Cobalt patcher, everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN` (default theme SHA-256 `dc79805d…`). **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included.
@@ -427,12 +429,32 @@ Auto-mute: while the loop plays, the M4 mutes the tracks whose FX1 send is above
 
 How it works: the looper uses the Granular SDRAM buffer, allocated once when FX1 is built and before FX2. Loop audio is stored as 16-bit stereo, scaled so ±2.0 (overdub headroom) fills the range, at 4 bytes per frame. The hardware-tested Granular size (768,000 bytes) therefore holds 4 s: 2 bars at 120 BPM. When more SDRAM is free than that plus a 4 MB reserve, the buffer grows to whatever fits, up to 2 bars at 60 BPM (1,536,000 bytes). Longer loops drop to 1 bar, then to the buffer length. The TOOLS middle field shows the longest loop and the arena space that was free for it at boot, for example `Cblt L4.0s F3.1M`. On the first hardware test the old 32-bit buffer could not get its 7 MB and fell back to 2 s, so 2 bars became 1. The M4 publishes the project BPM (setting `0x85`, plain BPM 40–250), the sequencer state and its mute record to backup SRAM `0x38800EE0`. The M7 looper state lives at `0x38800EA0`, and its first cache line is cleaned after every block for the M4 (title and auto-mute). FX2 and the bootloader are not patched. Leaving the looper mode empties the loop.
 
-Checked on hardware with earlier looper builds: it boots, TOOLS shows `Cblt 1.2`, and a 1-bar loop at 120 BPM lasts 2 s. Not yet checked on hardware:
+### Hardware testing (one device)
 
-- 2 bars at 120 BPM with the 16-bit buffer, and the TOOLS capacity figures;
-- the pedal buttons, live title and auto-mute;
+All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the looper image `dc79805d…` (default theme) and earlier development builds. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+
+| | |
+|---|---|
+| ![FX1 mode menu](images/hardware/fx1-mode-menu.jpg) | ![Empty looper](images/hardware/looper-page-empty.jpg) |
+| **FX1 menu (B):** Phrase Looper in place of Granular | **Looper page, empty:** title `Looper`; Bars, Level and Dub knobs; REC, STOP, CLEAR and Sync |
+| ![Looper page, 1 bar](images/hardware/looper-page-1-bar.jpg) | ![Looper page, 2 bars](images/hardware/looper-page-2-bars.jpg) |
+| **Bars = 1 bar,** title `STOP` | **Bars = 2 bars,** title `STOP`, Sync on |
+| ![TOOLS capacity readout](images/hardware/tools-capacity-readout.jpg) | |
+| **TOOLS:** `L4.0s` = 4 s longest loop, `F1…` = about 1 MB arena free when FX1 was built. Known display issue: the readout is too wide for its field, overlapping the storage size on the left and cut off by the version on the right. | |
+
+Confirmed on that unit:
+
+- the looper build installs (hold **A** at power-on) and boots, and the other Cobalt features keep working in normal use;
+- FX1 lists Phrase Looper, and the looper page shows its controls and live title;
+- tempo: a 1-bar loop at 120 BPM lasts 2 s (earlier build);
+- the free arena when FX1 is built is only about 1 MB, so the looper uses the tested 768,000-byte buffer: 4 s, which is 2 bars at 120 BPM or faster. An earlier 32-bit build fell back to 1 bar for this reason (title `REC 1/1`).
+
+Not yet confirmed on hardware:
+
+- recording 2 bars at 120 BPM with the 16-bit buffer;
+- REC, STOP and CLEAR switching themselves off, and auto-mute of the tracks feeding FX1;
 - the start latency of Sync, which follows the sequencer position as Scenes does (one UI tick). Sync does not find bar boundaries while the sequencer is already running; REC then records at once;
-- CPU load and sound.
+- CPU load and sound over long sessions.
 
 Keep the stock `BLUEBOX.BIN` at hand before trying it.
 
