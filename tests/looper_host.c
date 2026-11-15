@@ -27,7 +27,8 @@ static void run(uint32_t frames,uint32_t bpm_x10,uint32_t playing) {for(uint32_t
 static void press(unsigned id) {pl_event(&p,id,1);pl_event(&p,id,0);}
 #define B16 ((int16_t *)g.buffer)
 static void setup(uint32_t cap) {
-    float *buffer=calloc((size_t)cap*PL_FRAME/sizeof(float)+1u,sizeof(float));
+    /* loop audio, then the tempo-follow state (PLX_BYTES), as the firmware allocates */
+    float *buffer=calloc(((size_t)cap*PL_FRAME+PLX_BYTES)/sizeof(float),sizeof(float));
     g_reset(&g,0,buffer);pl_reset(&p,0,cap);
     g.mode=1;g.density=2;g.freeze=0;
     pl_event(&p,LP_REC,0);pl_event(&p,LP_STOP,0);pl_event(&p,LP_CLEAR,0);
@@ -110,6 +111,22 @@ int main(void) {
     /* STOP and REC pressed in the same block: STOP wins. */
     press(LP_CLEAR);block(1200,1);press(LP_REC);block(1200,1);run(N*500u,1200,1);
     press(LP_REC);press(LP_STOP);block(1200,1);CHECK(p.state==PL_STOP,"simultaneous REC+STOP stops (state %u)",p.state);
+
+    /* Stretch: 1 bar at 120 BPM played at 128 BPM. Off keeps 96000 frames per
+     * pass; Vari and Keep both advance the read position at 128/120. */
+    for(unsigned mode=0;mode<3;mode++) {
+        press(LP_CLEAR);block(1200,0);g.freeze=0;g.density=1;
+        pl_event(&p,LP_STRETCH,(int)mode);
+        press(LP_REC);run(96000u,1200,0);
+        CHECK(p.state==PL_PLAY && p.len==96000u && p.stretch==mode,"stretch %u: 1-bar take",mode);
+        uint32_t frames=0,wraps=0,last=p.pos;
+        while(wraps<3u){block(1280,0);frames+=N;if(p.pos<last)wraps++;last=p.pos;}
+        double per=(double)frames/3.0,want=mode?96000.0*120.0/128.0:96000.0;
+        CHECK(fabs(per-want)<want*.002,"stretch %u at 128 BPM: about %.0f frames per pass (want %.0f)",mode,per,want);
+        float pk=0.f;for(unsigned i=0;i<N;i++)if(fabsf(out_l[i])>pk)pk=fabsf(out_l[i]);
+        CHECK(pk<=2.f && pk==pk,"stretch %u output finite and bounded",mode);
+    }
+    pl_event(&p,LP_STRETCH,0);
 
     /* Leaving the mode fades out and drops the loop and the button history. */
     g.mode=0;run(N*10u,1200,1);

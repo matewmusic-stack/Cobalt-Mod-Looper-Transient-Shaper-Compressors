@@ -233,6 +233,10 @@ run(u,2000);check(title(u)=='REC 1/2','title counts bars while recording (REC 1/
 run(u,2000);check(title(u)=='REC 2/2','... and REC 2/2')
 step(u,press(CLEAR));step(u,[(SYNC,0)])
 
+# ================================================== Stretch switch (M7 side)
+for v,name in [(1,'Vari'),(2,'Keep'),(9,'Keep (clamped)'),(0,'Off')]:
+ step(u,[(0x1bb,v)])
+ check(u32(u,PL+60)==min(v,2),'Stretch event %d sets the looper to %s'%(v,name))
 # ================================================== BPM and loop lengths
 lengths={}
 for raw,bars in [(120,2),(1200,2),(60,2),(40,2),(250,1),(0,1)]:

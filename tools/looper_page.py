@@ -16,6 +16,7 @@ GUIDE = '''<section id="looper"><h2>Using the Phrase Looper</h2>
 <tr><th>Bars</th><td>1 or 2 bars at the project BPM.</td></tr>
 <tr><th>Level</th><td>Loop volume. The FX1 return carries only the loop.</td></tr>
 <tr><th>Dub</th><td>How loud new playing is layered while overdubbing.</td></tr>
+<tr><th>Stretch</th><td>What the loop does when you change the project tempo after recording. <b>Off</b>: keeps its recorded speed (drifts against the new tempo). <b>Vari</b>: plays faster or slower to stay in time, and the pitch moves with it, like tape (&plusmn;8 BPM at 120 is about &plusmn;1 semitone). <b>Keep</b>: stays in time at the same pitch, with slight graininess on sustained notes.</td></tr>
 </table>
 <p class="muted">REC, STOP and CLEAR act once per press and never stay lit. While the loop plays, the tracks feeding FX1 are muted automatically, so you hear only the loop. They are unmuted while you record or overdub, and when you stop, clear or leave the looper. Tracks you muted yourself are never touched.</p>
 <p class="muted">Loops are stored as 16-bit audio. The TOOLS page shows the longest loop, for example <code>Cblt L4.0s</code>: 4 seconds is 2 bars at 120 BPM or faster. When 2 bars don’t fit, the loop is 1 bar and the title shows REC 1/1. Switching FX1 to another mode empties the loop.</p>

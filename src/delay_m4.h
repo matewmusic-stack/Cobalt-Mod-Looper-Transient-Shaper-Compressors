@@ -5,12 +5,14 @@
 #define G_DENSITY_MAX 2     /* Looper Bars: 1..2 */
 #define G_TITLE "Looper"
 #define LP_STATE ((const volatile struct phrase_looper *)0x38800ea0u)
-#define LP_ONLY(id) ((id)==LP_STOP) /* looper-only controls, hidden in other modes */
+#define LP_ONLY(id) ((id)==LP_STOP || (id)==LP_STRETCH) /* looper-only controls, hidden in other modes */
+#define LP_SLOW(id) ((id)==LP_STRETCH) /* 0..2 selector: slow notched travel like Bars */
 static uint32_t lp_title(char *t);
 #else
 #define G_DENSITY_MAX 4
 #define G_TITLE "Granulr"
 #define LP_ONLY(id) 0
+#define LP_SLOW(id) 0
 #endif
 typedef void (*vfn_rect)(void *,int *);
 typedef void (*populate_fn)(uint8_t *,short *);
@@ -53,8 +55,8 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
     if(*slot!=0x14)return result;
     if(gran_mode(app)) {
 #ifdef PHRASE_LOOPER
-        /* Phrase Looper: Bars, Level, Dub knobs; REC, STOP, CLEAR buttons; Sync. */
-        static const uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_REC,LP_STOP,LP_CLEAR,G_FREEZE};
+        /* Phrase Looper: Bars, Level, Dub, Stretch knobs; REC, STOP, CLEAR buttons; Sync. */
+        static const uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_STRETCH,LP_REC,LP_STOP,LP_CLEAR,G_FREEZE};
 #else
         static const uint16_t ids[]={G_POS,G_SIZE,G_DENSITY,0x4a,G_JITTER,0x39,0x3d,G_FREEZE,G_REVERSE};
 #endif
@@ -107,8 +109,8 @@ static void place(uint8_t *p,int slot) {
                 x=x0+(i<6?0:240);y=y0+45-44*(i&1);
             } else if(mode==4 && i==5){x=x0;y=y0+45;}
 #ifdef PHRASE_LOOPER
-            else if(gran && (i==3||i==4)){x=x0;y=y0+45-44*(i-3);}      /* REC below, STOP above */
-            else if(gran && (i==5||i==6)){x=x0+240;y=y0+45-44*(i-5);}  /* CLEAR below, Sync above */
+            else if(gran && (i==4||i==5)){x=x0;y=y0+45-44*(i-4);}      /* REC below, STOP above */
+            else if(gran && (i==6||i==7)){x=x0+240;y=y0+45-44*(i-6);}  /* CLEAR below, Sync above */
 #else
             else if(gran && (i==7||i==8)){x=x0;y=y0+45-44*(i-7);}
 #endif
@@ -168,7 +170,11 @@ static int value_index(unsigned id) {
 #ifndef PHRASE_LOOPER
     case G_SIZE:
 #endif
-    case T_SEGMENT:return 1;case G_DENSITY:return 2;case 0x4a:return 3;case G_JITTER:case T_RELEASE:return 4;case 0x33:return 5;case T_HICUT:return 6;case T_LOCUT:return 2;default:return -1;}
+    case T_SEGMENT:return 1;case G_DENSITY:return 2;
+#ifdef PHRASE_LOOPER
+    case LP_STRETCH:return 3; /* shares Pitch's slot: never on the same page */
+#endif
+case 0x4a:return 3;case G_JITTER:case T_RELEASE:return 4;case 0x33:return 5;case T_HICUT:return 6;case T_LOCUT:return 2;default:return -1;}
 }
 static void ui_register(uint8_t *p,int slot) {
     struct fx_ui *u=ui_state();int mode=slot==0x14?fx_mode((void *)0x300173d0u):sg_selected((void *)0x300173d0u)?SG_STYLE:0;
@@ -187,6 +193,13 @@ static void label_value(uint8_t *w) {
     unsigned id=*(uint16_t *)(w+0x94);
     int value=*(int *)(w+0x98);
     char text[16];char *p=text;
+#ifdef PHRASE_LOOPER
+    if(id==LP_STRETCH) {
+        static const char *const names[]={"Off","Vari","Keep"};
+        ((void (*)(void *,const char *))0x0813fe4bu)(w+0xa0,names[value<0?0:value>2?2:value]);
+        return;
+    }
+#endif
     if(id>=SG_SAT && id<=SG_LOCUT) {
         if(value<0)value=0;
         if(value>16000)value=16000;
@@ -276,11 +289,11 @@ unsigned dly_turn(uint8_t *w,int delta) {
     unsigned result=0;
     int sg_linear=slot==0x15 && (id==SG_RATE || id==SG_HICUT || id==SG_LOCUT);
     int logf=sg_linear || (slot==0x14 && (id==T_HICUT || id==T_LOCUT));
-    if((((id==0x4a || id==G_DENSITY) && slot==0x14) || logf) && !w[0x30] && !w[0x2d4]) {
+    if((((id==0x4a || id==G_DENSITY || LP_SLOW(id)) && slot==0x14) || logf) && !w[0x30] && !w[0x2d4]) {
         struct fx_ui *u=ui_state();int old=*(int *)(w+0x98);
-        int density=id==G_DENSITY;
-        int lo=logf?(id==SG_RATE?10:id==SG_HICUT || id==T_HICUT?500:20):density?1:-12;
-        int hi=logf?(id==SG_HICUT || id==T_HICUT?16000:2000):density?G_DENSITY_MAX:12;
+        int density=id==G_DENSITY || LP_SLOW(id);
+        int lo=logf?(id==SG_RATE?10:id==SG_HICUT || id==T_HICUT?500:20):density?(LP_SLOW(id)?0:1):-12;
+        int hi=logf?(id==SG_HICUT || id==T_HICUT?16000:2000):density?(LP_SLOW(id)?2:G_DENSITY_MAX):12;
         int scale=1;
         int denominator=logf?LOG_UNITS:density?256:160;
         int32_t *fraction=logf?&u->log_fraction:density?&u->density_fraction:&u->pitch_fraction;
@@ -456,6 +469,12 @@ void sg_title(void *label,const char *stock) {
  * so Density 4 yields (4-1)/4. Correct only its drawing fraction; the native
  * cursor range, input mapping, saved value and DSP remain 1..4 unchanged. */
 float dly_knob_fraction(uint8_t *w) {
+#ifdef PHRASE_LOOPER
+    if(*(uint16_t *)(w+0x32)==20 && *(uint16_t *)(w+0x94)==LP_STRETCH) {
+        int n=*(int *)(w+0x98);if(n<0)n=0;if(n>2)n=2;
+        return (float)n*.5f;
+    }
+#endif
     if(*(uint16_t *)(w+0x32)==20 && *(uint16_t *)(w+0x94)==G_DENSITY) {
         int n=*(int *)(w+0x98);if(n<1)n=1;if(n>G_DENSITY_MAX)n=G_DENSITY_MAX;
         return (float)(n-1)/(float)(G_DENSITY_MAX-1);

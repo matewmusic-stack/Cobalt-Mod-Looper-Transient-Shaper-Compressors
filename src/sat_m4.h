@@ -30,6 +30,7 @@ void sat_defs(void *table,unsigned id,unsigned type,const char *label,int min,in
     STOCK_DEF(table,G_FREEZE,4,"Sync:",0,1,"grnfreeze");
     STOCK_DEF(table,G_REVERSE,4,"Rec:",0,1,"grnreverse");   /* button */
     STOCK_DEF(table,0x1ba,4,"Stop:",0,1,"lpstop");         /* button, empty stock slot */
+    STOCK_DEF(table,0x1bb,1,"Stretch:",0,2,"lpstretch");   /* Off/Vari/Keep, empty stock slot */
 #else
     static const char *const modes[]={"Warp delay","Granular","Tape","Ducked","Reverse","Delay"};
     ((void (*)(void *,unsigned,const char *,const char *const *,unsigned,const char *))0x08134c39u)
@@ -90,7 +91,7 @@ void dly_defaults(void *set) {
 #endif
         {T_DRIVE,350},{T_DUCK,700},{T_RELEASE,300},{T_SEGMENT,400},{T_TONE,650},{T_HICUT,6000},{T_WILD,0},{T_LOCUT,20}
 #ifdef PHRASE_LOOPER
-        ,{0x1ba,0} /* Looper Stop button */
+        ,{0x1ba,0},{0x1bb,0} /* Looper Stop button, Stretch Off */
 #endif
     };
     for(unsigned i=0;i<sizeof(defaults)/sizeof(defaults[0]);i++)

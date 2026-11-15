@@ -398,7 +398,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 The looper is built as a separate firmware variant. The default build is unchanged: it still reproduces the released Cobalt 1.2.0 image (SHA-256 `c28981e5…`), and `patch_bluebox.html` and `docs/index.html` stay Cobalt-only.
 
-**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)**, or open `patch_looper.html` (also `docs/looper/index.html`) in a browser, and drop in the original desktop 1.5.2 `BLUEBOX.BIN`. As with the Cobalt patcher, everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN` (default theme SHA-256 `dc79805d…`). **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included.
+**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)**, or open `patch_looper.html` (also `docs/looper/index.html`) in a browser, and drop in the original desktop 1.5.2 `BLUEBOX.BIN`. As with the Cobalt patcher, everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN` (default theme SHA-256 `bf9f5c3a…`). **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included.
 
 ```sh
 # Arm GNU Toolchain 13.2.Rel1 on PATH, as for the normal build
@@ -422,6 +422,7 @@ Turn up the FX1 send on the tracks to loop and select **Phrase Looper** in the F
 | Bars | 1 or 2 (default 2) | Loop length in 4/4 bars at the project BPM. |
 | Level | 0–100 % (default 100 %) | Loop volume on the FX1 return. The return carries only the loop. |
 | Dub | 0–100 % (default 100 %) | How loud new input is layered while overdubbing. |
+| Stretch | Off / Vari / Keep (default Off) | What the loop does when the project tempo changes after recording. Off: keeps its recorded speed. Vari: varispeed, stays in time and the pitch follows the tempo. Keep: stays in time at the same pitch (WSOLA time-stretch). |
 
 REC, STOP and CLEAR are pedal-style: the M7 counts a press when a button goes from 0 to 1 in the FX1 event queue, and the M4 sets it back to 0 at once, so the buttons never stay lit. A value seen before the first one, such as a project load, only latches. STOP uses a new FX1 parameter, `0x1ba` (`lpstop`), in an empty stock definition slot; it is hidden in the other FX1 modes.
 
@@ -429,9 +430,20 @@ Auto-mute: while the loop plays, the M4 mutes the tracks whose FX1 send is above
 
 How it works: the looper uses the Granular SDRAM buffer, allocated once when FX1 is built and before FX2. Loop audio is stored as 16-bit stereo, scaled so ±2.0 (overdub headroom) fills the range, at 4 bytes per frame. The hardware-tested Granular size (768,000 bytes) therefore holds 4 s: 2 bars at 120 BPM. When more SDRAM is free than that plus a 4 MB reserve, the buffer grows to whatever fits, up to 2 bars at 60 BPM (1,536,000 bytes). Longer loops drop to 1 bar, then to the buffer length. The TOOLS middle field shows the longest loop and the arena space that was free for it at boot, for example `Cblt L4.0s F3.1M`. On the first hardware test the old 32-bit buffer could not get its 7 MB and fell back to 2 s, so 2 bars became 1. The M4 publishes the project BPM (setting `0x85`, plain BPM 40–250), the sequencer state and its mute record to backup SRAM `0x38800EE0`. The M7 looper state lives at `0x38800EA0`, and its first cache line is cleaned after every block for the M4 (title and auto-mute). FX2 and the bootloader are not patched. Leaving the looper mode empties the loop.
 
+**Tempo follow (Stretch).** The loop remembers the BPM it was recorded at, and with Stretch on it follows the current project BPM (rate = now ÷ recorded, limited to 0.5–2×). *Vari* reads the loop at that rate with 4-point cubic Hermite interpolation. *Keep* plays 2048-frame (43 ms) Hann grains at normal speed, one every 1024 frames, and starts each grain at the offset (±5 ms) whose start best matches the previous grain's continuation (WSOLA). The search is spread over the blocks between grains, so no block is heavy. Its 64 bytes of state sit after the loop audio, so the buffer request is 768,064 bytes. Measured in the emulator (`tests/test_stretch.py`, 1 bar recorded at 120 BPM, played at 112 and 128 BPM):
+
+| | Off | Vari | Keep |
+|---|---|---|---|
+| Beat timing | 120 BPM (drifts) | new tempo, within 0.03 % | new tempo; single beats ±5 ms |
+| 440 Hz tone at 112 / 128 BPM | 440 / 440 Hz | 410.6 / 469.4 Hz | 440.0 / 439.6 Hz |
+| Tone residual | −79 dB | −82 dB | −34 to −38 dB |
+| Instructions per block, worst | 3.3k | 6.9k | 9.2k (tested Granular: 14.8k–16.8k) |
+
+At the recorded tempo both modes play the loop unchanged. While stretched, overdubbing layers input at the current read position. Not yet tried on hardware.
+
 ### Hardware testing (one device)
 
-All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the looper image `dc79805d…` (default theme) and earlier development builds. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the looper image `dc79805d…` (before Stretch) and earlier development builds. The current build with Stretch (`bf9f5c3a…`) has not been on hardware yet. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
 
 | | |
 |---|---|

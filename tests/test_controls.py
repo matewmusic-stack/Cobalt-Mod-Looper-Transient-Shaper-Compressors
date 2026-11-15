@@ -257,4 +257,26 @@ for row,mode in enumerate([5,0,1,2,3,4]):
  check(len(seen)==1 and struct.unpack_from('<II',seen[0],12)==(0x1a0,mode),'selector row '+str(row)+' maps to backward-compatible saved mode '+str(mode))
 seen.clear();u.mem_write(POP+0xd99a,struct.pack('<H',21));call(u,u32(u,0x814c62c),POP,event(u,0x150,2))
 check(len(seen)==1 and struct.unpack_from('<I',seen[0],16)[0]==2,'FX2 selector event value passes through unchanged')
+if LOOPER_BUILD:
+ # Phrase Looper Stretch knob (0x1bb): Off/Vari/Keep labels, slow notched travel
+ # like Bars, full-scale needle, on the real FX encoder and label paths.
+ u=init();u.mem_write(P+0xc398,b'\x01');stub(u,0x812abe0,lambda u:None)
+ changes=[];stub(u,0x813a414,lambda u:changes.append(bytes(u.mem_read(u.reg_read(UC_ARM_REG_R1),24))))
+ names=[]
+ for v in (0,1,2):
+  knob(u,0x1bb,v);w32(u,TICK,10000+v);call(u,S['dly_turn'],W,0);names.append(text(u,W))
+ check(names==['Off','Vari','Keep'],'Stretch knob shows Off, Vari, Keep %s'%names)
+ knob(u,0x1bb,0);changes.clear()
+ for i in range(255):w32(u,TICK,100000+i*1000);call(u,S['dly_turn'],W,1)
+ check(u32(u,W+0x98)==0 and not changes,'Stretch: 255 slow units do not step yet')
+ w32(u,TICK,400000);call(u,S['dly_turn'],W,1)
+ check(u32(u,W+0x98)==1 and len(changes)==1 and text(u,W)=='Vari','Stretch: 256 slow units step once, to Vari')
+ for i in range(20):w32(u,TICK,500000+i*1000);call(u,S['dly_turn'],W,100)
+ check(u32(u,W+0x98)==2 and text(u,W)=='Keep','Stretch stops at Keep')
+ for i in range(20):w32(u,TICK,600000+i*1000);call(u,S['dly_turn'],W,(-100)&0xffffffff)
+ check(u32(u,W+0x98)==0 and text(u,W)=='Off','Stretch stops at Off')
+ fr=[]
+ for v in (0,1,2):
+  knob(u,0x1bb,v);call(u,S['dly_knob_fraction'],W);fr.append(struct.unpack('<f',struct.pack('<I',u.reg_read(UC_ARM_REG_S0)))[0])
+ check(fr==[0.,.5,1.],'Stretch needle spans the full scale %s'%fr)
 print(str(H.checks)+' total v1.0.0-alpha.4 control checks passed; physical buttons/touch and display remain device tests.')
