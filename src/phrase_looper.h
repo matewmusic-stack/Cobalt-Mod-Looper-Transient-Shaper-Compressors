@@ -99,6 +99,7 @@ struct pl_song {int32_t ok,ticks;};
 #define PLS_SEEN 1u                   /* position seen since the last stop */
 #define PLS_LOCKED 2u                 /* the loop follows the song position */
 #define PLS_QREC 4u                   /* this take ends on a bar line */
+#define PLS_RUN 8u                    /* the transport was running last block */
 #define PLM_N 8                       /* tempo window: up to 7 beats */
 struct pl_sync {
     uint32_t magic;
@@ -300,10 +301,20 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
             break;
         case PL_PLAY:p->state=PL_DUB;break;
         case PL_DUB:p->state=PL_PLAY;break;
-        case PL_STOP:if(p->len){p->state=PL_PLAY;p->pos=0;s->cycle=0x7fffffff;}break;
+        case PL_STOP:if(p->len){p->state=PL_DUB;p->pos=0;s->cycle=0x7fffffff;}break;  /* the button reads OVDUB */
         default:break;
         }
     }
+}
+/* The loop follows the transport: it stops when the transport stops (a take
+ * in progress keeps what was recorded, as STOP does) and plays again, in
+ * step with the song, when it starts. */
+static inline void pl_transport(struct phrase_looper *p,struct pl_sync *s,int16_t *buffer,int run) {
+    if(run==!!(s->flags&PLS_RUN))return;
+    s->flags^=PLS_RUN;
+    if(run){if(p->state==PL_STOP && p->len){p->state=PL_PLAY;p->pos=0;s->cycle=0x7fffffff;}}
+    else if(p->state==PL_PLAY || p->state==PL_DUB)p->state=PL_STOP;
+    else if(p->state==PL_REC){pl_close(p,buffer,PL_STOP);s->flags&=~(PLS_LOCKED|PLS_QREC);}
 }
 
 /* Renders one block. in_* is the FX1 input copied before the native delay
@@ -471,6 +482,7 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
     if(s->mr>0.f)bpm_x100=(uint32_t)(s->mr*300000.f+.5f);
     p->song_x100=s->mr>0.f?bpm_x100:0u;
     (void)playing;
+    pl_transport(p,s,buffer,run);
     pl_controls(p,g,bpm_x100,run,s);
     /* Waiting for a bar line but the sequencer stopped: with Sync off, record
      * now, as REC does while stopped (with Sync on, wait for the start). */

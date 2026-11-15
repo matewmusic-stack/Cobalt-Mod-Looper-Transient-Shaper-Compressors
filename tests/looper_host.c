@@ -91,7 +91,8 @@ int main(void) {
     press(LP_STOP);block(1200,0);CHECK(p.state==PL_STOP,"STOP stops");
     run(N*20u,1200,0);CHECK(out_l[N-1]==0.f && p.pos==0,"stopped is silent, rewound");
     press(LP_STOP);block(1200,0);CHECK(p.state==PL_PLAY && p.pos==N,"STOP again plays from the start");
-    press(LP_STOP);block(1200,0);press(LP_REC);block(1200,0);CHECK(p.state==PL_PLAY,"REC when stopped plays");
+    press(LP_STOP);block(1200,0);press(LP_REC);block(1200,0);CHECK(p.state==PL_DUB && p.pos==N,"REC (OVDUB) when stopped overdubs from the start");
+    press(LP_REC);block(1200,0);CHECK(p.state==PL_PLAY,"... and again plays");
 
     /* CLEAR. */
     press(LP_CLEAR);block(1200,0);CHECK(p.state==PL_EMPTY && p.len==0,"CLEAR empties");
@@ -219,6 +220,8 @@ int main(void) {
          * the measured 128, so it plays at its own length, not stretched. */
         song_x10=0u;run(N*(PLS_STILL+2u),1260,0);
         CHECK(abs((int)p.song_x100-12800)<=3,"stopped: the measured tempo is kept (%u)",p.song_x100);
+        CHECK(p.state==PL_STOP,"the transport stopped: the loop stopped with it");
+        press(LP_STOP);block(1260,0);                 /* play it by hand, transport still stopped */
         uint32_t frames=0,wraps=0,last=p.pos;
         while(wraps<3u && frames<2000000u){block(1260,0);if(wraps)frames+=N;if(p.pos<last)wraps++;last=p.pos;}
         CHECK(fabs((double)frames/2.0-(double)p.len)<(double)p.len*.002,"stopped: the loop keeps its own length (%.0f vs %u frames per pass)",(double)frames/2.0,p.len);

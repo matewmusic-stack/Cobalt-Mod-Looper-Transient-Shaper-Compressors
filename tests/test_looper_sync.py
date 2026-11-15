@@ -153,12 +153,13 @@ u=setup();tempo(u,120);seq=Seq(u,bpm=120.0)
 take(u,seq,bars=1)
 seq.on=False
 for _ in range(400):blk(u,seq)
-check(pl(u)['state']==PLAYING,'sequencer stopped: the loop keeps playing freely')
+check(pl(u)['state']==4,'transport stopped: the loop stops with it (STOP)')
+o=blk(u,seq);check(all(x==0. for x in o),'... and is silent')
 seq.t=7*BAR+500.0;seq.on=True                    # restart from a located position
 for _ in range(80):blk(u,seq)
 p=pl(u);s=sync(u)
 ph=(seq.t-s['start'])%BAR;want=ph*p['len']/BAR;e=abs(want-p['pos']);e=min(e,p['len']-e)
-check(e<=64,'sequencer restarts from bar 8: the loop relocks to the song phase (%.0f samples off)'%e)
+check(p['state']==PLAYING and e<=64,'transport starts again from bar 8: the loop plays, in step with the song (%.0f samples off)'%e)
 # ------------- external clock changes tempo, the bluebox BPM stays at 126
 u=setup();tempo(u,126);seq=Seq(u,bpm=126.0)
 take(u,seq,bars=2,mode=1)

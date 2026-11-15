@@ -55,11 +55,13 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
     if(*slot!=0x14)return result;
     if(gran_mode(app)) {
 #ifdef PHRASE_LOOPER
-        /* Phrase Looper: Bars, Level, Dub, Stretch knobs; REC, STOP, CLEAR buttons; Sync;
-         * then the stock delay on the loop: Time (division with Beat Sync on),
-         * Feedback, Echo, Ping. */
-        uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_STRETCH,LP_REC,LP_STOP,LP_CLEAR,G_FREEZE,
-                        fw_get((uint8_t *)app+0xe48,0x35)?0x34:0x33,0x39,LP_ECHO,0x36};
+        /* Phrase Looper, in the stock order the encoders follow (groups of
+         * four): Bars, Level, Dub, Stretch; the stock delay on the loop: Time
+         * (division with Beat Sync on), Feedback, Echo, Ping; then the side
+         * buttons as on the Delay page: REC, CLEAR left, STOP, Sync right. */
+        uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_STRETCH,
+                        fw_get((uint8_t *)app+0xe48,0x35)?0x34:0x33,0x39,LP_ECHO,0x36,
+                        LP_REC,LP_CLEAR,LP_STOP,G_FREEZE};
 #else
         static const uint16_t ids[]={G_POS,G_SIZE,G_DENSITY,0x4a,G_JITTER,0x39,0x3d,G_FREEZE,G_REVERSE};
 #endif
@@ -100,7 +102,9 @@ static void move(uint8_t *w,int x,int y,int h) {
 static void place(uint8_t *p,int slot) {
     if(p[P_COMPACT_OFF] || (uint16_t)(slot-0x14)>=2)return;
     int mode=slot==0x14?fx_mode((void *)0x300173d0u):-1;
+#ifndef PHRASE_LOOPER
     int gran=mode==1;
+#endif
     int x0=*(int *)(p+4),y0=*(int *)(p+8);
     for(int w=0;w<13;w++) {
         /* Tape has no FILT since exp.8: its later widgets use FILT's old
@@ -112,13 +116,12 @@ static void place(uint8_t *p,int slot) {
                 x=x0+(i<6?0:240);y=y0+45-44*(i&1);
             } else if(mode==4 && i==5){x=x0;y=y0+45;}
 #ifdef PHRASE_LOOPER
-            else if(gran && (i==4||i==5)){x=x0;y=y0+45-44*(i-4);}      /* REC below, STOP above */
-            else if(gran && (i==6||i==7)){x=x0+240;y=y0+45-44*(i-6);}  /* CLEAR below, Sync above */
-            else if(gran && i>=8 && i<12)x=x0+(i<10?144:192);           /* the delay, in the empty middle */
+            /* Looper: side buttons at the stock positions, as on the Delay page. */
+            else if(i>=8 && i<12) {
 #else
             else if(gran && (i==7||i==8)){x=x0;y=y0+45-44*(i-7);}
-#endif
             else if(!gran && i>=8 && i<12) {
+#endif
                 x=x0+(i<10?0:240);
                 y=y0+45-44*(i&1);
                 if(mode==2 && i>=10) {
@@ -153,6 +156,7 @@ struct fx_ui {
 #ifdef PHRASE_LOOPER
     uint8_t *title;uint32_t title_key; /* FX1 title label, live looper state */
     int32_t stretch_shown;              /* Stretch value its knob shows; -1 = redraw */
+    uint32_t ticked;                    /* UI ms when the looper page last ticked (pc_m4 lp_main) */
 #endif
 };
 #define UI ((struct fx_ui *)0x38800b00u)
@@ -181,6 +185,9 @@ static int value_index(unsigned id) {
 #endif
 case 0x4a:return 3;case G_JITTER:case T_RELEASE:return 4;case 0x33:return 5;case T_HICUT:return 6;case T_LOCUT:return 2;default:return -1;}
 }
+#ifdef PHRASE_LOOPER
+_Static_assert(__builtin_offsetof(struct fx_ui,ticked)==0x94,"pc_m4 reads fx_ui.ticked at 0x38800b94");
+#endif
 static void ui_register(uint8_t *p,int slot) {
     struct fx_ui *u=ui_state();int mode=slot==0x14?fx_mode((void *)0x300173d0u):sg_selected((void *)0x300173d0u)?SG_STYLE:0;
     if(u->panel!=p || u->slot!=slot || u->mode!=mode) {
@@ -352,6 +359,7 @@ void dly_tick(uint8_t *p,void *flags) {
     uint32_t now=UI_NOW;
 #ifdef PHRASE_LOOPER
     if(slot==0x14 && u->title && fx_mode((void *)0x300173d0u)==1) {
+        u->ticked=now;
         char t[12];uint32_t k=lp_title(t);
         if(k!=u->title_key){u->title_key=k;((void (*)(void *,const char *))0x0813fe4bu)(u->title,t);}
     }

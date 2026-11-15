@@ -150,6 +150,6 @@ if LOOPER_BUILD:
  call(q,0x8120264,SET,MODE,1);call(q,0x8120264,SET,0x35,1)
  call(q,M['symbols']['4']['dly_parameters'],MODEL,SLOT,LIST)
  ids=[struct.unpack('<H',q.mem_read(LIST+4+i*12,2))[0] for i in range(u32(q,LIST))]
- check(ids==MODE1_IDS[:8]+[0x34,0x39,0x1bc,0x36],'Looper with Beat Sync on: the echo Time knob is the note division (0x34)')
+ check(ids==MODE1_IDS[:4]+[0x34]+MODE1_IDS[5:],'Looper with Beat Sync on: the echo Time knob is the note division (0x34)')
  check(bytes(stockui.mem_read(0xc0010000+28*0x1bc,28))==bytes(28) and call(q,0x8120234,SET,0x1bc)==0,'Echo uses a previously empty definition, default 0 (off)')
 print(str(H.checks)+' new delay-type native checks passed; audio feel and hardware cycles remain device tests.')

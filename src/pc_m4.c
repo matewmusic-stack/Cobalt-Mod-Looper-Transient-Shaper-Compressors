@@ -1084,6 +1084,12 @@ static void lp_knob(unsigned cell,unsigned id,int v) {uint16_t c=(uint16_t)cell;
 static int lp_track(unsigned i) {return *(void *const *)(sc_table(i)+4)!=0;}
 /* A mute record from before this boot must never unmute anything. */
 static void lp_boot(void) {backup_enable();PWR_CR1|=1u<<8;LP_TEMPO->muted=0;}
+/* Sync is locked while a loop exists: a change is put back (bit 29 = held,
+ * bit 30 = its value), so an accidental press cannot change it mid-set. */
+#define LP_HOLD 0x20000000u
+#define LP_HELD 0x40000000u
+#define LP_UI_PANEL (*(uint8_t *volatile *)0x38800b04u)   /* fx_ui.panel: the FX page */
+#define LP_UI_TICKED (*(volatile uint32_t *)0x38800b94u)  /* fx_ui.ticked: the looper page is showing */
 void lp_main(int loading) {
     backup_enable();PWR_CR1|=1u<<8;
     volatile struct pl_tempo *t=LP_TEMPO;
@@ -1092,23 +1098,38 @@ void lp_main(int loading) {
     uint8_t *fx1=sc_table(0x14u);
     if(!*(void *const *)(fx1+4))return;
     int looper=fw_get(fx1,0x1a0u)==1;
+    unsigned st=looper && LP_PL->magic==PL_MAGIC?LP_PL->state:PL_EMPTY;
+    uint32_t m=t->muted,h=m&(LP_HOLD|LP_HELD);m&=~(LP_HOLD|LP_HELD);
     if(looper) {
         static const uint16_t buttons[]={LP_REC,LP_STOP,LP_CLEAR};
         for(unsigned i=0;i<3;i++)if(fw_get(fx1,buttons[i])!=0)lp_knob(0x14u,buttons[i],0);
-    }
-    int play=looper && LP_PL->magic==PL_MAGIC && LP_PL->state==PL_PLAY;
-    uint32_t m=t->muted;
+        int sync=fw_get(fx1,G_FREEZE)!=0,loop=st>=PL_REC;
+        if(!loop)h=0;
+        else if(!h)h=LP_HOLD|(sync?LP_HELD:0u);
+        else if(sync!=!!(h&LP_HELD))lp_knob(0x14u,G_FREEZE,sync?0:1);
+        /* REC reads OVDUB once there is a loop (toggle label: 5 characters). */
+        uint8_t *p=LP_UI_PANEL;
+        if(p && PC_UI_NOW-LP_UI_TICKED<200u && *(short *)(p+0xc3a4)==0x14)for(unsigned i=0;i<13u;i++) {
+            uint8_t *w=p+0x100b0+i*0x1d4;
+            if(*(uint16_t *)(w+0xfa)!=LP_REC)continue;
+            int dub=st>=PL_PLAY;
+            if(dub!=(w[0x65]=='O'))((void (*)(void *,const char *))0x0813820du)(w,dub?"OVDUB":"REC");
+            break;
+        }
+    } else h=0;
+    int play=st==PL_PLAY;
     if(play && !(m&LP_APPLIED)) {
         for(unsigned i=0;i<12u;i++)
             if(lp_track(i) && fw_get(sc_table(i),LP_FX1)>0 && fw_get(sc_table(i),LP_MUTE)==0) {
                 lp_knob(i,LP_MUTE,1);m|=1u<<i;
             }
-        t->muted=m|LP_APPLIED;
+        m|=LP_APPLIED;
     } else if(!play && m) {
         for(unsigned i=0;i<12u;i++)
             if((m>>i&1u) && lp_track(i) && fw_get(sc_table(i),LP_MUTE)!=0)lp_knob(i,LP_MUTE,0);
-        t->muted=0;
+        m=0;
     }
+    t->muted=m|h;
 }
 #endif
 static void *x_el(void *node) {return node ? (*(void *(**)(void *))*(void **)node)(node) : 0;}
