@@ -387,7 +387,32 @@ unsigned dly_process(uint8_t *obj, void *ctx)
     /* Fully faded-in Granular replaces the whole delay output, so the native
      * rings, filters and line reads are skipped. Its events still run: see
      * dly_body_events. Any fade, gated capture or other mode runs it fully. */
-    int skip=gran && GS->mode && XS->mode==1 && !gated && GS->fade==1.f && ib->l;
+    int full=gran && GS->mode && XS->mode==1 && !gated && GS->fade==1.f && ib->l;
+#ifdef PHRASE_LOOPER
+    /* Echo: with the looper fully in, the stock delay runs on the loop
+     * instead of being skipped: the loop is rendered first and sent into the
+     * delay at the Echo level; the return then carries loop + echoes. It
+     * keeps running after Echo goes to 0 until the echoes have died away. */
+    float loop[2][D_MAXN];
+    struct pl_stretch *lx=full && PL->magic==PL_MAGIC && PL->owner==obj?(struct pl_stretch *)(void *)((uint8_t *)GS->buffer+PL->cap*PL_FRAME):0;
+    int echo=lx && lx->magic==PLX_MAGIC && (PL->echo || lx->echo_g>0.f || lx->echo_pk>1e-5f);
+    if(echo) {
+        uint32_t bpm_x100,playing;
+        pl_tempo_read(&bpm_x100,&playing);
+        struct pl_song song;pl_song_read(&song);
+        for(unsigned i=0;i<n;i++)loop[0][i]=loop[1][i]=0.f;
+        pl_render_o2(PL,GS,bpm_x100,playing,&song,input[0],input[1],loop[0],loop[1],n);
+        pl_publish();
+        float *l,*r;fw_stereo(bus,&l,&r);
+        float e=lx->echo_g,et=(float)PL->echo*.001f,de=n?(et-e)/(float)n:0.f;
+        for(unsigned i=0;i<n;i++){e+=de;l[i]=loop[0][i]*e;r[i]=loop[1][i]*e;}
+        lx->echo_g=et;
+        ib->silent=0;ib->stereo=1;
+    }
+#else
+    const int echo=0;
+#endif
+    int skip=full && !echo;
     if(skip)dly_body_events(obj,ctx,ib);
     else if(XS->mode==2) {
         /* exp.8: Tape hides FILT/Cutoff and bypasses the native filter (its
@@ -407,6 +432,20 @@ unsigned dly_process(uint8_t *obj, void *ctx)
         float *l,*r;fw_stereo(bus,&l,&r);x_tape_return(XS,l,r,n);
     }
     if(gran && (XS->mode==4 || XS->rev_mix!=0.f))x_reverse_input_o2(XS,GS,input[0],input[1],n);
+#ifdef PHRASE_LOOPER
+    if(echo) {
+        float *l,*r;fw_stereo(bus,&l,&r);
+        float pk=0.f;
+        for(unsigned i=0;i<n;i++) {
+            float a=l[i]<0.f?-l[i]:l[i],b=r[i]<0.f?-r[i]:r[i];
+            if(a>pk)pk=a;
+            if(b>pk)pk=b;
+            if(!(pk<=1e9f))pk=1e9f;
+            l[i]+=loop[0][i];r[i]+=loop[1][i];
+        }
+        lx->echo_pk=pk;
+    } else
+#endif
     if(gran) {
         float *l,*r;
         if(GS->mode || GS->fade>0.f) {

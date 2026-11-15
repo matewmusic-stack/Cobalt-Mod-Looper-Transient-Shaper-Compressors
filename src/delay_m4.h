@@ -5,7 +5,7 @@
 #define G_DENSITY_MAX 2     /* Looper Bars: 1..2 */
 #define G_TITLE "Looper"
 #define LP_STATE ((const volatile struct phrase_looper *)0x38800ea0u)
-#define LP_ONLY(id) ((id)==LP_STOP || (id)==LP_STRETCH) /* looper-only controls, hidden in other modes */
+#define LP_ONLY(id) ((id)==LP_STOP || (id)==LP_STRETCH || (id)==LP_ECHO) /* looper-only controls, hidden in other modes */
 #define LP_SLOW(id) ((id)==LP_STRETCH) /* 0..2 selector: slow notched travel like Bars */
 static uint32_t lp_title(char *t);
 #else
@@ -55,8 +55,11 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
     if(*slot!=0x14)return result;
     if(gran_mode(app)) {
 #ifdef PHRASE_LOOPER
-        /* Phrase Looper: Bars, Level, Dub, Stretch knobs; REC, STOP, CLEAR buttons; Sync. */
-        static const uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_STRETCH,LP_REC,LP_STOP,LP_CLEAR,G_FREEZE};
+        /* Phrase Looper: Bars, Level, Dub, Stretch knobs; REC, STOP, CLEAR buttons; Sync;
+         * then the stock delay on the loop: Time (division with Beat Sync on),
+         * Feedback, Echo, Ping. */
+        uint16_t ids[]={G_DENSITY,G_POS,G_JITTER,LP_STRETCH,LP_REC,LP_STOP,LP_CLEAR,G_FREEZE,
+                        fw_get((uint8_t *)app+0xe48,0x35)?0x34:0x33,0x39,LP_ECHO,0x36};
 #else
         static const uint16_t ids[]={G_POS,G_SIZE,G_DENSITY,0x4a,G_JITTER,0x39,0x3d,G_FREEZE,G_REVERSE};
 #endif
@@ -111,6 +114,7 @@ static void place(uint8_t *p,int slot) {
 #ifdef PHRASE_LOOPER
             else if(gran && (i==4||i==5)){x=x0;y=y0+45-44*(i-4);}      /* REC below, STOP above */
             else if(gran && (i==6||i==7)){x=x0+240;y=y0+45-44*(i-6);}  /* CLEAR below, Sync above */
+            else if(gran && i>=8 && i<12)x=x0+(i<10?144:192);           /* the delay, in the empty middle */
 #else
             else if(gran && (i==7||i==8)){x=x0;y=y0+45-44*(i-7);}
 #endif

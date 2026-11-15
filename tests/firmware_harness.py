@@ -40,12 +40,12 @@ def theme_image(theme):
 # FX1 mode 1 defaults for ids 0x1a1..0x1a3, its list name, and its control list.
 GDEF=[(0x1a1,1000),(0x1a2,0),(0x1a3,2)] if LOOPER_BUILD else [(0x1a1,250),(0x1a2,80),(0x1a3,4)]
 JDEF=1000 if LOOPER_BUILD else 0          # 0x1a4 default: Looper Dub 100%, Granular Jitter 0
-XDEF=[(0x1ba,0),(0x1bb,0)] if LOOPER_BUILD else []   # Looper STOP button and Stretch (Off), appended last
-XIDS={0x1ba,0x1bb} if LOOPER_BUILD else set()     # ids the looper build adds
+XDEF=[(0x1ba,0),(0x1bb,0),(0x1bc,0)] if LOOPER_BUILD else []   # Looper STOP button, Stretch (Off), Echo (off), appended last
+XIDS={0x1ba,0x1bb,0x1bc} if LOOPER_BUILD else set()     # ids the looper build adds
 MODE1_NAME=b'Phrase Looper' if LOOPER_BUILD else b'Granular'
 MODE1_TITLE=b'Looper' if LOOPER_BUILD else b'Granulr'
 DENSITY_MAX=2 if LOOPER_BUILD else 4  # Looper Bars reuses the Density id
-MODE1_IDS=[0x1a3,0x1a1,0x1a4,0x1bb,0x1a6,0x1ba,0x1a2,0x1a5] if LOOPER_BUILD else [0x1a1,0x1a2,0x1a3,0x4a,0x1a4,0x39,0x3d,0x1a5,0x1a6]
+MODE1_IDS=[0x1a3,0x1a1,0x1a4,0x1bb,0x1a6,0x1ba,0x1a2,0x1a5,0x33,0x39,0x1bc,0x36] if LOOPER_BUILD else [0x1a1,0x1a2,0x1a3,0x4a,0x1a4,0x39,0x3d,0x1a5,0x1a6]
 RET=0x080dfff0;NEXT_FN=0x080dff00;checks=0
 
 def check(cond,msg):

@@ -37,6 +37,7 @@
 #define LP_REC G_REVERSE
 #define LP_CLEAR G_SIZE
 #define LP_STRETCH 0x1bb          /* experiment: 0 off, 1 varispeed, 2 keep pitch */
+#define LP_ECHO 0x1bc             /* loop into the stock delay: 0 off .. 1000 */
 #define PL_MAGIC 0x504c4f32u
 #define PL_TEMPO_MAGIC 0x504c5431u
 #define PL_FS 48000u
@@ -78,7 +79,8 @@ struct phrase_looper {
     float gain,level,dub;         /* smoothed */
     uint32_t bpm_x100;            /* tempo of the current loop, hundredths of a BPM */
     uint32_t free_kb;             /* arena free before the FX1 buffer (KiB), for TOOLS */
-    uint32_t stretch;             /* 0 off, 1 varispeed, 2 keep pitch (experiment) */
+    uint16_t stretch;             /* 0 off, 1 varispeed, 2 keep pitch */
+    uint16_t echo;                /* Echo knob: loop level into the stock delay, 0..1000 */
 };
 
 /* The bluebox's song position, read by the M7 each block: 960 ticks per
@@ -148,6 +150,8 @@ struct pl_stretch {
     uint32_t a_next,cont;         /* predicted analysis position, continuation */
     int32_t idx,best,cbest;       /* candidate index, best offset, coarse best */
     float best_v;
+    float echo_g;                 /* Echo: smoothed send of the loop into the stock delay */
+    float echo_pk;                /* Echo: peak of the last block's echoes (tail still sounding) */
 };
 _Static_assert(sizeof(struct pl_stretch)<=PLX_BYTES,"stretch state fits PLX_BYTES");
 _Static_assert(sizeof(struct pl_sync)<=PLT_BYTES-PLX_BYTES,"sync state fits after the stretch state");
@@ -171,7 +175,8 @@ static inline void pl_drop(struct phrase_looper *p) {
 
 /* Called for every FX1 parameter event, in queue order. */
 static inline void pl_event(struct phrase_looper *p,unsigned id,int value) {
-    if(id==LP_STRETCH){p->stretch=(uint32_t)g_clampi(value,0,2);return;}
+    if(id==LP_STRETCH){p->stretch=(uint16_t)g_clampi(value,0,2);return;}
+    if(id==LP_ECHO){p->echo=(uint16_t)g_clampi(value,0,1000);return;}
     int k=id==LP_REC?0:id==LP_STOP?1:id==LP_CLEAR?2:-1;
     if(k<0)return;
     int v=value!=0;
@@ -454,7 +459,7 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
     if(!buffer)return;
     struct pl_stretch *x=(struct pl_stretch *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME);
     struct pl_sync *s=(struct pl_sync *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME+PLX_BYTES);
-    if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->magic=PLX_MAGIC;}
+    if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->echo_g=x->echo_pk=0.f;x->magic=PLX_MAGIC;}
     if(s->magic!=PLS_MAGIC){uint32_t *w=(uint32_t *)s;for(unsigned i=0;i<sizeof(*s)/4;i++)w[i]=0;s->still=PLS_STILL;s->cycle=0x7fffffff;s->magic=PLS_MAGIC;}
     int started=pl_song_block(s,song,bpm_x100,n);
     int run=s->still<PLS_STILL;
