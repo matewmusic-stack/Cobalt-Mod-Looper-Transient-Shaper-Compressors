@@ -24,6 +24,7 @@ MODE,LEVEL,CLEAR,BARS,DUB,SYNC,REC,STOP=0x1a0,0x1a1,0x1a2,0x1a3,0x1a4,0x1a5,0x1a
 MUTE,FX1SEND=0x160,0xda
 EMPTY,ARMED,RECORDING,PLAYING,STOPPED,DUBBING=range(6)
 PL_MAGIC=0x504c4f32;PL_CAP_MAX=384000;PL_BYTES=PL_CAP_MAX*4;G_BYTES=768000;G_FRAMES=G_BYTES//4;RESERVE=4<<20
+XB=64   # tempo-follow state kept after the loop audio (PLX_BYTES)
 # Loop audio is 16-bit stereo, +/-2.0 full scale: frame k is 4 bytes at ptr+4k.
 def q16(u,a,n):return struct.unpack('<%dh'%(2*n),u.mem_read(a,4*n))
 S4=M['symbols']['4'];C4=M['symbols']['cue4'];PC=M['symbols']['pcm4']
@@ -99,22 +100,22 @@ def title(u):
 # ================================================================ allocation
 u,allocs=lsetup()
 p=pl(u);ptr=u32(u,GS+8);sizes=[s for a,s in allocs]
-check(PL_BYTES in sizes and ptr==[a for a,s in allocs if s==PL_BYTES][0],'roomy arena: looper buffer of %d bytes (2 bars at 60 BPM) allocated at FX1 construction'%PL_BYTES)
+check(PL_BYTES+XB in sizes and ptr==[a for a,s in allocs if s==PL_BYTES+XB][0],'roomy arena: looper buffer of %d bytes (2 bars at 60 BPM) allocated at FX1 construction'%PL_BYTES)
 check(p['magic']==PL_MAGIC and p['cap']==PL_CAP_MAX and p['state']==EMPTY and p['last']==(-1,-1,-1),'looper reset at construction: full capacity, empty, no button history')
-i=sizes.index(PL_BYTES)
+i=sizes.index(PL_BYTES+XB)
 check(len(sizes)>i+1,'FX2 Shoegaze still allocates after the looper buffer')
-cursor=[a for a,s in allocs if s==PL_BYTES][0]
-u2,a2=lsetup(limit=cursor+PL_BYTES+RESERVE-1)
-check(PL_BYTES-32 in [s for a,s in a2] and pl(u2)['cap']==(PL_BYTES-32)//4,'less room: the looper takes what fits while 4 MB stay free (%d bytes)'%(PL_BYTES-32))
-u2,a2=lsetup(limit=cursor+G_BYTES+RESERVE)
-check(G_BYTES in [s for a,s in a2] and pl(u2)['cap']==G_FRAMES and pl(u2)['free_kb']==(G_BYTES+RESERVE)//1024,'no room above the reserve: the tested %d-byte buffer, 4 s of 16-bit stereo'%G_BYTES)
+cursor=[a for a,s in allocs if s==PL_BYTES+XB][0]
+u2,a2=lsetup(limit=cursor+PL_BYTES+XB+RESERVE-1)
+check(PL_BYTES+32 in [s for a,s in a2] and pl(u2)['cap']==(PL_BYTES-32)//4,'less room: the looper takes what fits while 4 MB stay free (%d bytes)'%(PL_BYTES-32))
+u2,a2=lsetup(limit=cursor+G_BYTES+XB+RESERVE)
+check(G_BYTES+XB in [s for a,s in a2] and pl(u2)['cap']==G_FRAMES and pl(u2)['free_kb']==(G_BYTES+XB+RESERVE)//1024,'no room above the reserve: the tested %d-byte buffer, 4 s of 16-bit stereo'%G_BYTES)
 tempo(u2,120,0,0);K[0]=0
 step(u2,LOOPER_ON+[(BARS,2)]);run(u2,10);step(u2,press(REC))
 check(pl(u2)['len']==192000 and pl(u2)['bars']==2,'tested buffer: 2 bars at 120 BPM now fit (192000 frames)')
 step(u2,press(CLEAR));tempo(u2,100,0);step(u2,press(REC))
 check(pl(u2)['len']==115200 and pl(u2)['bars']==1,'tested buffer at 100 BPM: drops to 1 bar')
-u3,a3=lsetup(limit=cursor+PL_BYTES+RESERVE)
-check(PL_BYTES in [s for a,s in a3],'exactly buffer + 4 MB free still takes the full looper buffer')
+u3,a3=lsetup(limit=cursor+PL_BYTES+XB+RESERVE)
+check(PL_BYTES+XB in [s for a,s in a3],'exactly buffer + 4 MB free still takes the full looper buffer')
 u4,a4=lsetup(limit=cursor+G_BYTES-1)
 w32(u4,CTX+0x1529c+0x600,0);o=step(u4,LOOPER_ON)
 msgs=[struct.unpack('<B7xIHHiI',u4.mem_read(CTX+0x1529c+i*24,24)) for i in range(u32(u4,CTX+0x1529c+0x600))]
@@ -125,7 +126,9 @@ m4(u);tempo(u,240,0,0);K[0]=0
 put(u,0x14,MODE,1)
 watch={'hi':0,'lo':None}
 def on_write(u,access,address,size,value,_):
- off=address-ptr;watch['hi']=max(watch['hi'],off+size)
+ off=address-ptr
+ if PL_BYTES<=off<PL_BYTES+XB:return   # tempo-follow state, not loop audio
+ watch['hi']=max(watch['hi'],off+size)
  if watch['lo'] is None or off<watch['lo']:watch['lo']=off
 u.hook_add(UC_HOOK_MEM_WRITE,on_write,begin=ptr,end=ptr+PL_BYTES+0x40000-1)
 bad_reads=[]
@@ -134,8 +137,9 @@ def on_read(u,access,address,size,value,_):
  # the record position, whichever is larger; the end-of-take fade reads
  # back the last frames of the take before the state moves on.
  n=max(u32(u,PL+16),u32(u,PL+20))
+ if PL_BYTES<=address-ptr<PL_BYTES+XB:return   # tempo-follow state
  if address-ptr>=n*4:bad_reads.append((address-ptr,u32(u,PL+12),u32(u,PL+16),u32(u,PL+20)))
-rh=u.hook_add(UC_HOOK_MEM_READ,on_read,begin=ptr,end=ptr+PL_BYTES-1)
+rh=u.hook_add(UC_HOOK_MEM_READ,on_read,begin=ptr,end=ptr+PL_BYTES+XB-1)
 step(u,[e if e!=(REC,0) else (REC,1) for e in LOOPER_ON])   # a project saved with REC=1: its only REC value latches
 check(pl(u)['state']==EMPTY and pl(u)['last']==(1,0,0),'values at load latch: a saved REC=1 does not start a take')
 step(u,[(REC,0)]);run(u,10)

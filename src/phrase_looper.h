@@ -36,6 +36,7 @@
 #define LP_STOP 0x1ba             /* new FX1 parameter: STOP button */
 #define LP_REC G_REVERSE
 #define LP_CLEAR G_SIZE
+#define LP_STRETCH 0x1bb          /* experiment: 0 off, 1 varispeed, 2 keep pitch */
 #define PL_MAGIC 0x504c4f32u
 #define PL_TEMPO_MAGIC 0x504c5431u
 #define PL_FS 48000u
@@ -77,7 +78,29 @@ struct phrase_looper {
     float gain,level,dub;         /* smoothed */
     uint32_t bpm_x10;             /* tempo used for the current loop */
     uint32_t free_kb;             /* arena free before the FX1 buffer (KiB), for TOOLS */
-    uint32_t spare;
+    uint32_t stretch;             /* 0 off, 1 varispeed, 2 keep pitch (experiment) */
+};
+
+/* Tempo-follow state, kept in SDRAM just after the loop audio (PLX_BYTES):
+ * backup SRAM has no room left. Rebuilt whenever its magic is wrong. */
+#define PLX_MAGIC 0x504c5853u
+#define PLX_BYTES 64u
+#define PLX_G 2048u               /* keep pitch: grain length, 42.7 ms */
+#define PLX_H (PLX_G/2u)          /* hop: two Hann grains overlap and sum to 1 */
+#define PLX_D 240                 /* WSOLA search range, +/-5 ms */
+#define PLX_L 256u                /* WSOLA match length */
+struct pl_stretch {
+    uint32_t magic;
+    float src;                    /* fractional read position in the loop */
+    float rate;                   /* playback rate now: current BPM / recorded BPM */
+    uint32_t start[2],age[2];     /* keep pitch: grain source start and age */
+    uint32_t hop;                 /* samples until the next grain */
+    uint32_t next;                /* grain slot to start next */
+    uint32_t last;                /* source start of the newest grain */
+    /* WSOLA search for the next grain, spread over the blocks of one hop */
+    uint32_t a_next,cont;         /* predicted analysis position, continuation */
+    int32_t idx,best,cbest;       /* candidate index, best offset, coarse best */
+    float best_v;
 };
 #define PL_PRESS_REC 1u
 #define PL_PRESS_STOP 2u
@@ -99,6 +122,7 @@ static inline void pl_drop(struct phrase_looper *p) {
 
 /* Called for every FX1 parameter event, in queue order. */
 static inline void pl_event(struct phrase_looper *p,unsigned id,int value) {
+    if(id==LP_STRETCH){p->stretch=(uint32_t)g_clampi(value,0,2);return;}
     int k=id==LP_REC?0:id==LP_STOP?1:id==LP_CLEAR?2:-1;
     if(k<0)return;
     int v=value!=0;
@@ -198,11 +222,123 @@ static inline void pl_controls(struct phrase_looper *p,const struct granular *g,
  * ran; out_* holds the native delay output and receives the loop, crossfaded
  * with g->fade exactly as the Granular renderer did. When the mode is left
  * and the fade reaches zero, the shared ring is handed back empty. */
+/* ---- tempo follow (experiment) ---- */
+static inline float pl_cos(float x) {        /* cos x, |x| <= pi/2, error < 3e-5 */
+    float x2=x*x;
+    return 1.f-x2*(.5f-x2*(1.f/24.f-x2*(1.f/720.f-x2*(1.f/40320.f))));
+}
+static inline float pl_hann(uint32_t age) {  /* 0.5 - 0.5 cos(2 pi age / G) */
+    float t=(float)age*(1.f/(float)PLX_G);   /* 0..1 */
+    float x=t*6.2831853f;                    /* 0..2pi */
+    float c;
+    if(x<1.5707963f)c=pl_cos(x);
+    else if(x<4.7123890f)c=-pl_cos(x-3.1415927f);
+    else c=pl_cos(x-6.2831853f);
+    return .5f-.5f*c;
+}
+static inline uint32_t pl_wrap(int32_t i,uint32_t len) {
+    while(i<0)i+=(int32_t)len;
+    while((uint32_t)i>=len)i-=(int32_t)len;
+    return (uint32_t)i;
+}
+static inline float pl_mono(const int16_t *b,uint32_t i) {return (float)b[2u*i]+(float)b[2u*i+1u];}
+/* WSOLA: start a grain near src, at the offset whose start best matches the
+ * natural continuation of the previous grain, so overlapping grains add in
+ * phase. Normalized cross-correlation of the L+R sum over PLX_L frames.
+ * Coarse search every 16 frames over +/-PLX_D, then every 2 frames around
+ * the best: about 1,400 multiply-adds per grain (one grain every 21 ms). */
+static inline float pl_match(const int16_t *b,uint32_t len,uint32_t ia,uint32_t ic) {
+    float xy=0.f,yy=1.f;
+    for(uint32_t k=0;k<PLX_L;k+=8u) {
+        float y=pl_mono(b,ia),x=pl_mono(b,ic);
+        xy+=x*y;yy+=y*y;
+        ia+=8u;if(ia>=len)ia-=len;
+        ic+=8u;if(ic>=len)ic-=len;
+    }
+    return (xy<0.f?-xy:xy)*xy/yy;               /* sign(xy) * xy^2 / yy, no sqrt */
+}
+/* Candidates: 31 coarse offsets every 16 frames over +/-PLX_D, then 15
+ * fine ones every 2 frames around the coarse best. pl_search() tries a few
+ * per block, so the search never loads a single block. */
+#define PLX_COARSE 31
+#define PLX_CAND (PLX_COARSE+15)
+static inline void pl_search_begin(struct pl_stretch *x,uint32_t len,uint32_t start) {
+    x->a_next=pl_wrap((int32_t)(x->src+x->rate*(float)PLX_H),len);
+    x->cont=pl_wrap((int32_t)start+(int32_t)PLX_H,len);
+    x->idx=0;x->best=0;x->cbest=0;x->best_v=-1e30f;
+}
+static inline void pl_search(struct pl_stretch *x,const int16_t *b,uint32_t len,int steps) {
+    while(steps-- > 0 && x->idx<PLX_CAND) {
+        int32_t d;
+        if(x->idx<PLX_COARSE)d=-PLX_D+16*x->idx;
+        else {
+            if(x->idx==PLX_COARSE)x->cbest=x->best;
+            d=x->cbest-14+2*(x->idx-PLX_COARSE);
+            if(d<-PLX_D)d=-PLX_D;
+            if(d>PLX_D)d=PLX_D;
+        }
+        float v=pl_match(b,len,pl_wrap((int32_t)x->a_next+d,len),x->cont);
+        if(v>x->best_v){x->best_v=v;x->best=d;}
+        x->idx++;
+    }
+}
+static inline void pl_x_reset(struct pl_stretch *x,uint32_t pos) {
+    x->src=(float)pos;x->age[0]=x->age[1]=PLX_G;x->hop=0;x->next=0;x->last=pos;
+    x->idx=0;x->best=0;x->cbest=0;x->best_v=-1e30f;x->a_next=x->cont=pos;
+}
+/* One frame of a stretched loop at x->src, advancing by x->rate. */
+static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16_t *b,uint32_t len,float *l,float *r) {
+    if(p->stretch==1u || len<PLX_G*4u) {
+        /* Varispeed: 4-point cubic Hermite interpolation. */
+        uint32_t i1=(uint32_t)x->src;if(i1>=len)i1=0;
+        float f=x->src-(float)i1;
+        uint32_t i0=i1?i1-1u:len-1u,i2=i1+1u<len?i1+1u:0u,i3=i2+1u<len?i2+1u:0u;
+        for(unsigned c=0;c<2;c++) {
+            float y0=pl_f(b[2u*i0+c]),y1=pl_f(b[2u*i1+c]),y2=pl_f(b[2u*i2+c]),y3=pl_f(b[2u*i3+c]);
+            float c1=.5f*(y2-y0),c2=y0-2.5f*y1+2.f*y2-.5f*y3,c3=.5f*(y3-y0)+1.5f*(y1-y2);
+            float y=((c3*f+c2)*f+c1)*f+y1;
+            if(c)*r=y;else *l=y;
+        }
+    } else {
+        /* Keep pitch: two Hann grains at speed 1, one started every PLX_H. */
+        if(!x->hop) {
+            uint32_t a=(uint32_t)x->src;if(a>=len)a=0;
+            /* Offset from the search over the last hop (none for the first grain). */
+            uint32_t s=x->age[x->next^1u]<PLX_G && x->idx>0?pl_wrap((int32_t)a+x->best,len):a;
+            x->start[x->next]=s;x->age[x->next]=0;x->last=s;x->next^=1u;x->hop=PLX_H;
+            pl_search_begin(x,len,s);
+        }
+        x->hop--;
+        float sl=0.f,sr=0.f;
+        for(unsigned k=0;k<2;k++)if(x->age[k]<PLX_G) {
+            uint32_t i=x->start[k]+x->age[k];while(i>=len)i-=len;
+            float w=pl_hann(x->age[k]);
+            sl+=w*pl_f(b[2u*i]);sr+=w*pl_f(b[2u*i+1u]);
+            x->age[k]++;
+        }
+        *l=sl;*r=sr;
+    }
+    x->src+=x->rate;
+    if(x->src>=(float)len)x->src-=(float)len;
+}
+
 static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t bpm_x10,uint32_t playing,
                              const float *in_l,const float *in_r,float *out_l,float *out_r,unsigned n) {
     int16_t *buffer=(int16_t *)g->buffer;
     if(!buffer)return;
     pl_controls(p,g,bpm_x10,playing);
+    struct pl_stretch *x=(struct pl_stretch *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME);
+    if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->magic=PLX_MAGIC;}
+    unsigned stretch=p->stretch && p->len;
+    if(stretch && (uint32_t)x->src!=p->pos)pl_x_reset(x,p->pos);  /* controls moved the loop */
+    float rate_t=1.f;
+    if(stretch && p->bpm_x10) {
+        rate_t=(float)bpm_x10/(float)p->bpm_x10;
+        if(rate_t<.5f)rate_t=.5f;
+        if(rate_t>2.f)rate_t=2.f;
+    }
+    float drate=n?(rate_t-x->rate)/(float)n:0.f;
+    if(stretch && p->stretch==2u && p->len>=PLX_G*4u)pl_search(x,buffer,p->len,2);
     float target=g->mode?1.f:0.f,fade=g->fade;
     float level_t=(float)g_clampi(g->position,0,1000)*.001f;
     float dub_t=(float)g_clampi(g->jitter,0,1000)*.001f;
@@ -218,7 +354,18 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
             if(++pos>=len) {
                 pl_seal(buffer,len);
                 pos=0;state=PL_PLAY;p->seq++;
+                pl_x_reset(x,0);
             }
+        } else if(stretch && (state==PL_PLAY || state==PL_DUB || state==PL_STOP)) {
+            x->rate+=drate;
+            uint32_t w=(uint32_t)x->src;if(w>=len)w=0;
+            pl_x_frame(p,x,buffer,len,&l,&r);
+            if(state==PL_DUB && dub>0.f) {          /* layer at the read position */
+                int16_t *s=buffer+2u*w;
+                s[0]=pl_q(pl_f(s[0])+in_l[i]*dub);
+                s[1]=pl_q(pl_f(s[1])+in_r[i]*dub);
+            }
+            pos=(uint32_t)x->src;if(pos>=len)pos=0;
         } else if((state==PL_PLAY || state==PL_DUB || state==PL_STOP) && len) {
             int16_t *s=buffer+2u*pos;
             l=pl_f(s[0]);r=pl_f(s[1]);
@@ -237,7 +384,8 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
         if(fade==1.f){out_l[i]=yl;out_r[i]=yr;}
         else {out_l[i]+=(yl-out_l[i])*fade;out_r[i]+=(yr-out_r[i])*fade;}
     }
-    if(state==PL_STOP && gain==0.f)pos=0;
+    if(state==PL_STOP && gain==0.f){pos=0;pl_x_reset(x,0);}
+    if(!stretch || state==PL_REC)x->rate=rate_t;  /* follow at once when not stretching */
     p->state=state;p->len=len;p->pos=pos;
     p->level=level;p->dub=dub;p->gain=gain;
     g->fade=fade;

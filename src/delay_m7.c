@@ -498,20 +498,20 @@ unsigned dly_construct(uint8_t *obj) {
     uint32_t safe=limit<0xc3400000u?limit:0xc3400000u;
     uint32_t avail=cursor>=0xc0000000u && cursor<=safe?safe-cursor:0u;
     uint32_t want=avail>PL_RESERVE?(avail-PL_RESERVE)&~31u:0u;
-    if(want>PL_BYTES)want=PL_BYTES;
-    if(want>G_BYTES) {
+    if(want>PL_BYTES+PLX_BYTES)want=PL_BYTES+PLX_BYTES;   /* loop audio + stretch state */
+    if(want>G_BYTES+PLX_BYTES) {
         buffer=((void *(*)(unsigned))0x080412a5u)(want);
         if(buffer)requested=want;
     }
-    if(!buffer && cursor>=0xc0000000u && cursor<=limit && G_BYTES<=limit-cursor &&
-       cursor<=0xc3400000u-G_BYTES) {
-        buffer=((void *(*)(unsigned))0x080412a5u)(G_BYTES);
-        if(buffer)requested=G_BYTES;
+    if(!buffer && cursor>=0xc0000000u && cursor<=limit && G_BYTES+PLX_BYTES<=limit-cursor &&
+       cursor<=0xc3400000u-(G_BYTES+PLX_BYTES)) {
+        buffer=((void *(*)(unsigned))0x080412a5u)(G_BYTES+PLX_BYTES);
+        if(buffer)requested=G_BYTES+PLX_BYTES;
     }
 #endif
     g_reset(GS,obj,buffer);
 #ifdef PHRASE_LOOPER
-    pl_reset(PL,obj,requested/PL_FRAME);
+    pl_reset(PL,obj,requested?(requested-PLX_BYTES)/PL_FRAME:0u);
     PL->free_kb=avail/1024u;
     pl_publish();
     __asm volatile("dsb" ::: "memory");
