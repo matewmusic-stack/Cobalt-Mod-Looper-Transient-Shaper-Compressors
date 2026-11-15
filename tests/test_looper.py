@@ -24,7 +24,7 @@ MODE,LEVEL,CLEAR,BARS,DUB,SYNC,REC,STOP=0x1a0,0x1a1,0x1a2,0x1a3,0x1a4,0x1a5,0x1a
 MUTE,FX1SEND=0x160,0xda
 EMPTY,ARMED,RECORDING,PLAYING,STOPPED,DUBBING=range(6)
 PL_MAGIC=0x504c4f32;PL_CAP_MAX=384000;PL_BYTES=PL_CAP_MAX*4;G_BYTES=768000;G_FRAMES=G_BYTES//4;RESERVE=4<<20
-XB=160  # stretch + sync state kept after the loop audio (PLT_BYTES)
+XB=224  # stretch + sync state kept after the loop audio (PLT_BYTES)
 # Loop audio is 16-bit stereo, +/-2.0 full scale: frame k is 4 bytes at ptr+4k.
 def q16(u,a,n):return struct.unpack('<%dh'%(2*n),u.mem_read(a,4*n))
 S4=M['symbols']['4'];C4=M['symbols']['cue4'];PC=M['symbols']['pcm4']
@@ -209,6 +209,9 @@ check(pl(u)['state']==PLAYING,'REC when stopped plays the loop')
 step(u,press(CLEAR))
 check(pl(u)['state']==EMPTY and pl(u)['len']==0 and title(u)=='Looper','CLEAR empties the loop; title back to Looper')
 o=run(u,10);check(all(x==0. for x in o),'cleared looper is silent')
+t=[]
+for v in (12802,9950,0):w32(u,PL+36,v);t.append(title(u))
+check(t==['Lp128.0','Lp99.5','Looper'],'empty with a measured song tempo: title shows it (%s)'%t)
 
 # =================================================== takes closed early
 step(u,press(REC));run(u,400);step(u,press(REC))
@@ -275,6 +278,10 @@ for v,name in [(1,'Vari'),(2,'Keep'),(9,'Keep (clamped)'),(0,'Off')]:
  step(u,[(0x1bb,v)])
  check(u32(u,PL+60)==min(v,2),'Stretch event %d sets the looper to %s'%(v,name))
 # ================================================== BPM and loop lengths
+m=u32(u,PL+36)
+check(abs(m-12000)<=3,'after the sequencer stops, the looper keeps the tempo it measured from the song position (%.2f)'%(m/100))
+tempo(u,100,0);step(u)
+check(u32(u,PL+36)==0,'changing the project BPM while stopped hands the tempo back to it')
 lengths={}
 for raw,bars in [(120,2),(1200,2),(60,2),(40,2),(250,1),(0,1)]:
  step(u,press(CLEAR)+[(BARS,bars)]);tempo(u,raw,0);step(u,press(REC));lengths[(raw,bars)]=(pl(u)['len'],pl(u)['bars'])

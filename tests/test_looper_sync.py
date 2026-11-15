@@ -159,4 +159,18 @@ for _ in range(80):blk(u,seq)
 p=pl(u);s=sync(u)
 ph=(seq.t-s['start'])%BAR;want=ph*p['len']/BAR;e=abs(want-p['pos']);e=min(e,p['len']-e)
 check(e<=64,'sequencer restarts from bar 8: the loop relocks to the song phase (%.0f samples off)'%e)
+# ------------- external clock changes tempo, the bluebox BPM stays at 126
+u=setup();tempo(u,126);seq=Seq(u,bpm=126.0)
+take(u,seq,bars=2,mode=1)
+seq.bpm=128.0
+for _ in range(int(8*60/128*48000/32)):blk(u,seq)          # 8 beats at 128
+m=u32(u,PL+36)
+check(abs(m-12800)<=3,'master goes to 128 (bluebox still 126): the looper measures %.2f BPM from the song position'%(m/100))
+blk(u,seq,[(CLEAR,1),(CLEAR,0)]);blk(u,seq,[(REC,1),(REC,0)])
+k=0
+while pl(u)['state']!=PLAYING and k<40000:blk(u,seq);k+=1
+p=pl(u);s=sync(u);want=2*BAR/(128*960/(60*48000))
+check(p['state']==PLAYING and p['bars']==2 and s['flags']&2 and abs(p['len']-want)<=64,'next take, bluebox BPM untouched: 2 bars at 128, %d samples (want %.0f), locked'%(p['len'],want))
+r=restarts(u,seq,2,20)
+check(len(r)>=9 and max(r)<=2.5,'it plays on the bar lines at 128 for 20 bars (worst %.2f ticks)'%max(r))
 print('PASSED',H.checks,'Phrase Looper sync checks; real STM32 timing and the bluebox\'s own position update rate remain hardware tests.')

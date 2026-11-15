@@ -460,8 +460,15 @@ static uint32_t lp_title(char *t) {
         bar=s->pos*bars/s->len+1u;if(bar>bars)bar=bars;
         *q++=(char)('0'+bar);*q++='/';*q++=(char)('0'+bars);
     }
+    /* Empty with the sequencer running: the tempo the looper measures. */
+    unsigned b=st==PL_EMPTY && s->magic==PL_MAGIC?(s->song_x100+5u)/10u:0u;
+    if(b>=200u && b<=3000u) {
+        q=t;*q++='L';*q++='p';
+        if(b>=1000u)*q++=(char)('0'+b/1000u);
+        *q++=(char)('0'+b/100u%10u);*q++=(char)('0'+b/10u%10u);*q++='.';*q++=(char)('0'+b%10u);
+    } else b=0;
     *q=0;
-    return st|bar<<8|bars<<16;
+    return st|bar<<8|bars<<12|b<<16;
 }
 #endif
 void dly_title(void *label,const char *stock) {

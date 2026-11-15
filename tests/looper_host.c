@@ -190,6 +190,45 @@ int main(void) {
         run(N*(PLS_STILL+2u),1200,0);
     }
 
+    /* External clock changes tempo: the bluebox BPM stays at 126 while the
+     * master (and so the song position) goes 126 -> 128. The looper measures
+     * the song position, so the next take is a true bar at 128 without
+     * touching the bluebox BPM. */
+    {
+        struct pl_sync *sy=(struct pl_sync *)(void *)((uint8_t *)g.buffer+p.cap*PL_FRAME+PLX_BYTES);
+        press(LP_CLEAR);g.freeze=0;g.density=2;pl_event(&p,LP_STRETCH,1);
+        run(N*(PLS_STILL+2u),1260,0);
+        song_t=0.0;song_x10=1260u;
+        uint32_t k=0;while(song_t<4.0*PLQ_BAR+500.0 && k<40000u){block(1260,1);k++;}
+        CHECK(abs((int)p.song_x100-12600)<=3,"song tempo measured at 126: %u",p.song_x100);
+        press(LP_REC);while(p.state!=PL_PLAY && k<80000u){block(1260,1);k++;}
+        double bar126=(double)PLQ_BAR*300000.0/12600.0;
+        CHECK(p.state==PL_PLAY && (sy->flags&PLS_LOCKED) && fabs((double)p.len-2.0*bar126)<64.0,"2 bars at 126: %u samples (want %.0f)",p.len,2.0*bar126);
+        song_x10=1280u;                          /* Blackbox switches to a project at 128 */
+        uint32_t t0=k;
+        while(abs((int)p.song_x100-12800)>3 && k<t0+40000u){block(1260,1);k++;}
+        double beats=(double)(k-t0)*N*12800.0/300000.0/PLQ_BEAT;
+        CHECK(abs((int)p.song_x100-12800)<=3 && beats<=8.0,"measured tempo reaches 128.00 within %.1f beats",beats);
+        press(LP_CLEAR);block(1260,1);k++;press(LP_REC);
+        while(p.state!=PL_PLAY && k<t0+200000u){block(1260,1);k++;}
+        double bar128=(double)PLQ_BAR*300000.0/12800.0;
+        CHECK(p.state==PL_PLAY && (sy->flags&PLS_LOCKED) && p.bars==2u && fabs((double)p.len-2.0*bar128)<64.0,
+              "next take with the bluebox still at 126: 2 bars at 128, %u samples (want %.0f)",p.len,2.0*bar128);
+        CHECK(abs((int)p.bpm_x100-12800)<=3,"the take's tempo is the measured 128 (%u), not the bluebox's 126",p.bpm_x100);
+        /* Sequencer stops (the bluebox BPM still 126): a free Vari loop keeps
+         * the measured 128, so it plays at its own length, not stretched. */
+        song_x10=0u;run(N*(PLS_STILL+2u),1260,0);
+        CHECK(abs((int)p.song_x100-12800)<=3,"stopped: the measured tempo is kept (%u)",p.song_x100);
+        uint32_t frames=0,wraps=0,last=p.pos;
+        while(wraps<3u && frames<2000000u){block(1260,0);if(wraps)frames+=N;if(p.pos<last)wraps++;last=p.pos;}
+        CHECK(fabs((double)frames/2.0-(double)p.len)<(double)p.len*.002,"stopped: the loop keeps its own length (%.0f vs %u frames per pass)",(double)frames/2.0,p.len);
+        /* Turning the bluebox BPM while stopped hands the tempo back to it. */
+        block(1300,0);
+        CHECK(p.song_x100==0u,"stopped, BPM changed: the measured tempo is dropped");
+        pl_event(&p,LP_STRETCH,0);
+        run(N*4u,1200,0);
+    }
+
     /* Leaving the mode fades out and drops the loop and the button history. */
     g.mode=0;run(N*10u,1200,1);
     CHECK(g.fade==0.f && p.state==PL_EMPTY && g.valid==0 && p.last[0]==-1,"mode exit resets");

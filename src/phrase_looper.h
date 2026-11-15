@@ -74,7 +74,7 @@ struct phrase_looper {
     /* -- second cache line: M7 only -- */
     int8_t last[3];               /* last REC/STOP/CLEAR value, -1 unknown */
     uint8_t presses;              /* bit 0 REC, 1 STOP, 2 CLEAR */
-    uint32_t transport_seen;
+    uint32_t song_x100;           /* tempo measured from the song position; 0 = not running */
     float gain,level,dub;         /* smoothed */
     uint32_t bpm_x100;            /* tempo of the current loop, hundredths of a BPM */
     uint32_t free_kb;             /* arena free before the FX1 buffer (KiB), for TOOLS */
@@ -97,6 +97,7 @@ struct pl_song {int32_t ok,ticks;};
 #define PLS_SEEN 1u                   /* position seen since the last stop */
 #define PLS_LOCKED 2u                 /* the loop follows the song position */
 #define PLS_QREC 4u                   /* this take ends on a bar line */
+#define PLM_N 8                       /* tempo window: up to 7 beats */
 struct pl_sync {
     uint32_t magic;
     uint32_t still;                   /* blocks since the song position changed */
@@ -110,7 +111,16 @@ struct pl_sync {
     uint32_t flags;
     int32_t bar;                      /* bar index at the last sample (for bar crossings) */
     int32_t cycle;                    /* Off: loop cycle being played */
-    uint32_t spare[4];
+    /* Tempo measured from the song position itself, so the looper follows
+     * whatever clocks the bluebox (its own tempo or an external MIDI clock)
+     * without the project BPM having to match: the position and block time
+     * at each of the last PLM_N beat crossings, ticks per sample over them. */
+    uint32_t clk;                     /* samples rendered (wraps) */
+    uint32_t mn;                      /* beat crossings stored since the last (re)start */
+    float mr;                         /* measured ticks per sample; 0 = none yet */
+    uint32_t sx;                      /* stated tempo while the song last ran */
+    int32_t at[PLM_N];                /* song position at the crossing */
+    uint32_t an[PLM_N];               /* clk at the crossing */
 };
 static inline int32_t pl_fdiv(int32_t a,int32_t b) {int32_t q=a/b;if((a%b)<0)q--;return q;}
 static inline int32_t pl_mod(int32_t a,int32_t b) {int32_t m=a%b;return m<0?m+b:m;}
@@ -119,7 +129,7 @@ static inline int32_t pl_mod(int32_t a,int32_t b) {int32_t m=a%b;return m<0?m+b:
  * backup SRAM has no room left. Rebuilt whenever its magic is wrong. */
 #define PLX_MAGIC 0x504c5853u
 #define PLX_BYTES 96u
-#define PLT_BYTES 160u            /* after the loop audio: stretch state, then sync state */
+#define PLT_BYTES 224u            /* after the loop audio: stretch state, then sync state */
 #define PLX_G 2048u               /* keep pitch: grain length, 42.7 ms */
 #define PLX_H (PLX_G/2u)          /* hop: two Hann grains overlap and sum to 1 */
 #define PLX_D 240                 /* WSOLA search range, +/-5 ms */
@@ -398,21 +408,42 @@ static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16
 
 /* Once per block: the bluebox's song position. Returns 1 when the sequencer
  * has just started (first movement after a stop). */
-static inline int pl_song_block(struct pl_sync *s,const struct pl_song *song,uint32_t bpm_x100) {
-    s->r=(float)bpm_x100*(1.f/300000.f);       /* 960 ticks per beat, 48 kHz */
-    if(!song || !song->ok){s->still=PLS_STILL;s->flags&=~PLS_SEEN;return 0;}
+/* Tempo from the song position: called when the position moved without a
+ * jump. Stores the position at each new beat and measures ticks per sample
+ * over the stored beats (2 to 7 of them). */
+static inline void pl_measure(struct pl_sync *s,int32_t ticks) {
+    int32_t beat=pl_fdiv(ticks,PLQ_BEAT);
+    if(s->mn && beat==pl_fdiv(s->at[(s->mn-1u)%PLM_N],PLQ_BEAT))return;
+    unsigned k=s->mn%PLM_N;
+    s->at[k]=ticks;s->an[k]=s->clk;s->mn++;
+    if(s->mn<3u)return;
+    unsigned o=s->mn>PLM_N?s->mn%PLM_N:0u;
+    int32_t dt=ticks-s->at[o];uint32_t ds=s->clk-s->an[o];
+    if(dt<=0 || !ds)return;
+    float m=(float)dt/(float)ds;
+    if(m>=2000.f/300000.f && m<=30000.f/300000.f)s->mr=m;   /* 20..300 BPM */
+}
+static inline int pl_song_block(struct pl_sync *s,const struct pl_song *song,uint32_t bpm_x100,unsigned n) {
+    s->clk+=n;
+    if(!song || !song->ok){s->still=PLS_STILL;s->flags&=~PLS_SEEN;s->mn=0;return 0;}
     int started=0;
     if(song->ticks!=s->last) {
         int fresh=s->still>=PLS_STILL || !(s->flags&PLS_SEEN);
         float e=(float)(song->ticks-s->qi)-s->qf;
-        if(fresh || e>(float)PLQ_BEAT || e<-(float)PLQ_BEAT){s->qi=song->ticks;s->qf=0.f;s->bar=pl_fdiv(s->qi,PLQ_BAR);started=fresh;}
-        else {
+        if(fresh || e>(float)PLQ_BEAT || e<-(float)PLQ_BEAT) {
+            s->qi=song->ticks;s->qf=0.f;s->bar=pl_fdiv(s->qi,PLQ_BAR);started=fresh;
+            s->mn=0;pl_measure(s,song->ticks);      /* new window from here */
+        } else {
+            pl_measure(s,song->ticks);
             s->qf+=e*.125f;
             if(s->qf>=1.f || s->qf<0.f){int32_t k=(int32_t)s->qf;if((float)k>s->qf)k--;s->qi+=k;s->qf-=(float)k;}
         }
         s->still=0;s->flags|=PLS_SEEN;
     } else if(s->still<PLS_STILL)s->still++;
     s->last=song->ticks;
+    /* 960 ticks per beat at 48 kHz: the measured tempo once there is one,
+     * else the stated tempo (MIDI clock or project BPM). */
+    s->r=s->mr>0.f?s->mr:(float)bpm_x100*(1.f/300000.f);
     return started;
 }
 
@@ -425,8 +456,15 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
     struct pl_sync *s=(struct pl_sync *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME+PLX_BYTES);
     if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->magic=PLX_MAGIC;}
     if(s->magic!=PLS_MAGIC){uint32_t *w=(uint32_t *)s;for(unsigned i=0;i<sizeof(*s)/4;i++)w[i]=0;s->still=PLS_STILL;s->cycle=0x7fffffff;s->magic=PLS_MAGIC;}
-    int started=pl_song_block(s,song,bpm_x100);
+    int started=pl_song_block(s,song,bpm_x100,n);
     int run=s->still<PLS_STILL;
+    /* The tempo is what the song position measured, also after it stops
+     * (an external clock stopping leaves the bluebox BPM where it was);
+     * changing the stated tempo while stopped hands back to it. */
+    if(run)s->sx=bpm_x100;
+    else if(bpm_x100!=s->sx)s->mr=0.f;
+    if(s->mr>0.f)bpm_x100=(uint32_t)(s->mr*300000.f+.5f);
+    p->song_x100=s->mr>0.f?bpm_x100:0u;
     (void)playing;
     pl_controls(p,g,bpm_x100,run,s);
     /* Waiting for a bar line but the sequencer stopped: with Sync off, record

@@ -67,6 +67,7 @@ static void pl_song_read(struct pl_song *s) {
 static void pl_publish(void) {
     __asm volatile("dsb" ::: "memory");
     *(volatile uint32_t *)0xe000ef68u=(uint32_t)PL; /* SCB DCCMVAC */
+    *(volatile uint32_t *)0xe000ef68u=(uint32_t)PL+32u; /* song tempo for the title */
     __asm volatile("dsb" ::: "memory");
 }
 #endif
