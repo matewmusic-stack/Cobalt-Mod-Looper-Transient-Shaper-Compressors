@@ -24,7 +24,7 @@ GUIDE = '''<section id="looper"><h2>Using the Phrase Looper</h2>
 <tr><th>Beat</th><td>Button, bottom right: the delay's tempo sync, separate from the looper's Sync. On: Time is a note division; off: milliseconds.</td></tr>
 </table>
 <p class="muted">REC and CLEAR act once per press and never stay lit. While the loop plays, the tracks feeding FX1 are muted automatically, so you hear only the loop. They are unmuted while you record or overdub, and when you stop, clear or leave the looper. Tracks you muted yourself are never touched.</p>
-<p class="muted">Loops are stored as 16-bit audio. The TOOLS page shows the longest loop, for example <code>4s 1.0M</code>: a 4-second loop is 2 bars at 120 BPM or faster. When 2 bars don’t fit, the loop is 1 bar and the title shows REC 1/1. Switching FX1 to another mode empties the loop.</p>
+<p class="muted">Loops are stored as 16-bit audio. The TOOLS page shows the longest loop, for example <code>4s 1.5M</code>: a 4-second loop is 2 bars at 120 BPM or faster. When 2 bars don’t fit, the loop is 1 bar and the title shows REC 1/1. Switching FX1 to another mode empties the loop.</p>
 </section>
 '''
 
@@ -48,7 +48,7 @@ def adapt(page, manifest):
         ('Restore the original from a Cobalt ' + v + ' firmware file',
          'Restore the original from a Cobalt ' + v + ' + Phrase Looper firmware file'),
         ('Generate a new BLUEBOX.BIN and install it with your usual SD-card procedure.',
-         'Generate a new BLUEBOX.BIN. Copy it to the root of the microSD card, hold <b>A</b> while powering the bluebox on, and let go when “Bluebox Installer” appears. TOOLS then shows the looper readout, e.g. <code>4s 1.0M</code>.'),
+         'Generate a new BLUEBOX.BIN. Copy it to the root of the microSD card, hold <b>A</b> while powering the bluebox on, and let go when “Bluebox Installer” appears. TOOLS then shows the looper readout, e.g. <code>4s 1.5M</code>.'),
         ('Unofficial firmware · Cobalt v' + v + '.', 'Unofficial, experimental firmware · Cobalt v' + v + ' + FX1 Phrase Looper.'),
         ('<section id="guide">', GUIDE + '<section id="guide">'),
         ('<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup.</p>',

@@ -526,7 +526,7 @@ float dly_knob_fraction(uint8_t *w) {
  * middle at +d4, official version at +34. Reuse the empty field. */
 #ifdef PHRASE_LOOPER
 /* Looper build: the middle TOOLS field shows the longest loop (whole seconds)
- * and the SDRAM that was free for it at boot, e.g. "4s 1.0M". The field holds
+ * and the SDRAM that was free for it at boot, e.g. "4s 1.5M". The field holds
  * about 8 characters of the 12 px header font; longer text spills over the
  * storage field on the left and is cut by the version on the right. */
 static char *lp_num(char *q,uint32_t tenths) {
