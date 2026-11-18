@@ -141,7 +141,15 @@ for mode,name in [(0,'Off'),(1,'Vari'),(2,'Keep')]:
   cyc_seen.add(s['cycle'])
  if mode:
   print('INFO %s at 128 BPM: play position within %.0f samples of the song phase over 6 bars; worst block %d instructions'%(name,worst,max(costs)))
-  check(worst<=3000 if mode==2 else worst<=64,'%s at 128 BPM (recorded at 120): the loop follows the song phase (worst %.0f samples)'%(name,worst))
+  check(worst<=3000 if mode==2 else worst<=480,'%s at 128 BPM (recorded at 120), first 6 bars after the change: the loop follows the song phase (worst %.0f samples; smooth steering, no jumps)'%(name,worst))
+  if mode==1:
+   for _ in range(int(16*BAR/(32*128*960/(60*48000)))):blk(u,seq)
+   w2=0
+   for _ in range(2000):
+    t0=seq.t;blk(u,seq);p=pl(u);s=sync(u);ph=(t0-s['start'])%lt
+    e=abs(ph*p['len']/lt-p['pos']);e=min(e,p['len']-e);w2=max(w2,e)
+   print('INFO Vari settled at 128 BPM: within %.0f samples'%w2)
+   check(w2<=64,'Vari settled at 128 BPM: within 64 samples of the song phase (%.0f)'%w2)
  else:
   r=restarts(u,seq,1,6)
   print('INFO Off at 128 BPM: restarts worst %.2f ticks from the bar line'%max(r))
@@ -160,6 +168,28 @@ for _ in range(80):blk(u,seq)
 p=pl(u);s=sync(u)
 ph=(seq.t-s['start'])%BAR;want=ph*p['len']/BAR;e=abs(want-p['pos']);e=min(e,p['len']-e)
 check(p['state']==PLAYING and e<=64,'transport starts again from bar 8: the loop plays, in step with the song (%.0f samples off)'%e)
+# ------------- Keep at the recorded tempo plays straight; grains only after a change
+def straight(u):
+ cap=pl(u)['cap'];ptr=u32(u,GS+8);return u32(u,ptr+cap*4+76)
+u=setup();tempo(u,120);seq=Seq(u,bpm=120.0)
+take(u,seq,bars=1,mode=2)
+for _ in range(100):blk(u,seq)
+check(straight(u)==1,'Keep, song at the recorded tempo: plays the loop straight (no grain splices, no smearing)')
+seq.bpm=128.0;tempo(u,128)
+for _ in range(300):blk(u,seq)
+check(straight(u)==0,'Keep, song at 128 (recorded at 120): time-stretches with grains')
+seq.bpm=120.0;tempo(u,120)
+for _ in range(1500):blk(u,seq)
+check(straight(u)==1,'Keep, back at the recorded tempo: straight again')
+# Vari locked: the read position runs smoothly (steered at most 0.5% per block), no per-sample jumps
+u=setup();tempo(u,120);seq=Seq(u,bpm=120.6,every=3,jitter=2,seed=9)
+take(u,seq,bars=1,mode=1)
+for _ in range(200):blk(u,seq)
+cap=pl(u)['cap'];ptr=u32(u,GS+8);rates=[]
+for _ in range(300):blk(u,seq);rates.append(struct.unpack('<f',u.mem_read(ptr+cap*4+12,4))[0])
+base=sum(rates)/len(rates)
+check(max(abs(r/base-1) for r in rates)<=.0101,'Vari locked, coarse noisy position: playback rate stays within 1%% of its mean (worst %.4f%%) - smooth, no jumps'%(100*max(abs(r/base-1) for r in rates)))
+
 # ------------- external clock changes tempo, the bluebox BPM stays at 126
 u=setup();tempo(u,126);seq=Seq(u,bpm=126.0)
 take(u,seq,bars=2,mode=1)

@@ -155,6 +155,8 @@ struct pl_stretch {
     float best_v;
     float echo_g;                 /* Echo: smoothed send of the loop into the stock delay */
     float echo_pk;                /* Echo: peak of the last block's echoes (tail still sounding) */
+    uint32_t straight;            /* Keep at (about) the recorded tempo: plays straight, no grains */
+    float vi;                     /* Vari/Keep lock: learned speed correction (integral term) */
 };
 _Static_assert(sizeof(struct pl_stretch)<=PLX_BYTES,"stretch state fits PLX_BYTES");
 _Static_assert(sizeof(struct pl_sync)<=PLT_BYTES-PLX_BYTES,"sync state fits after the stretch state");
@@ -390,8 +392,8 @@ static inline void pl_x_reset(struct pl_stretch *x,uint32_t pos) {
 }
 /* One frame of a stretched loop at x->src, advancing by x->rate. */
 static inline void pl_x_frame(struct phrase_looper *p,struct pl_stretch *x,int16_t *b,uint32_t len,float *l,float *r) {
-    if(p->stretch==1u || len<PLX_G*4u) {
-        /* Varispeed: 4-point cubic Hermite interpolation. */
+    if(p->stretch==1u || len<PLX_G*4u || x->straight) {
+        /* Varispeed (and Keep at the recorded tempo): 4-point cubic Hermite interpolation. */
         uint32_t i1=x->srci;if(i1>=len)i1=0;
         float f=x->srcf;
         uint32_t i0=i1?i1-1u:len-1u,i2=i1+1u<len?i1+1u:0u,i3=i2+1u<len?i2+1u:0u;
@@ -473,7 +475,7 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
     if(!buffer)return;
     struct pl_stretch *x=(struct pl_stretch *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME);
     struct pl_sync *s=(struct pl_sync *)(void *)((uint8_t *)g->buffer+p->cap*PL_FRAME+PLX_BYTES);
-    if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->echo_g=x->echo_pk=0.f;x->magic=PLX_MAGIC;}
+    if(x->magic!=PLX_MAGIC){pl_x_reset(x,p->pos);x->rate=1.f;x->echo_g=x->echo_pk=0.f;x->straight=0;x->vi=0.f;x->magic=PLX_MAGIC;}
     if(s->magic!=PLS_MAGIC){uint32_t *w=(uint32_t *)s;for(unsigned i=0;i<sizeof(*s)/4;i++)w[i]=0;s->still=PLS_STILL;s->cycle=0x7fffffff;s->magic=PLS_MAGIC;}
     int started=pl_song_block(s,song,bpm_x100,n);
     int run=s->still<PLS_STILL;
@@ -499,7 +501,17 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
         if(rate_t>2.f)rate_t=2.f;
     }
     float drate=n?(rate_t-x->rate)/(float)n:0.f;
-    if(stretch && p->stretch==2u && p->len>=PLX_G*4u)pl_search(x,buffer,p->len,2);
+    /* Keep splices grains only when the tempo really differs from the
+     * recorded one. Within 0.2% (3 cents) it plays the loop straight, like
+     * Vari: grains at speed 1 would only smear and phase the attacks.
+     * Hysteresis 0.2% in / 0.4% out. */
+    if(stretch && p->stretch==2u) {
+        float nom=run && (s->flags&PLS_LOCKED)?x->rate:rate_t;   /* the speed it actually plays at */
+        float dv=nom>1.f?nom-1.f:1.f-nom;
+        uint32_t st=x->straight?dv<.004f:dv<.002f;
+        if(st!=x->straight){x->straight=st;if(!st)pl_x_reset(x,x->srci);}
+    }
+    if(stretch && p->stretch==2u && !x->straight && p->len>=PLX_G*4u)pl_search(x,buffer,p->len,2);
     float target=g->mode?1.f:0.f,fade=g->fade;
     float level_t=(float)g_clampi(g->position,0,1000)*.001f;
     float dub_t=1.f;                       /* overdub at full level (no Dub knob) */
@@ -571,10 +583,33 @@ static inline void pl_render(struct phrase_looper *p,struct granular *g,uint32_t
                         pos++;
                     }
                 } else {
-                    /* Vari / Keep: the whole loop spans one cycle of the song. */
+                    /* Vari / Keep: the whole loop spans one cycle of the song.
+                     * The read position runs smoothly at the song's speed
+                     * (r*k) and is steered toward the song phase once per
+                     * block by a two-term lock: a pull with a 0.1 s time
+                     * constant plus a slowly learned speed correction (0.5 s),
+                     * which covers the few beats the tempo measurement needs
+                     * after a tempo change; at most +/-10%. Setting it from
+                     * the song every sample made it jump with each position
+                     * update: audible crunch. More than 50 ms off (start,
+                     * locate) jumps at once. */
                     s->cycle=cyc;
-                    {float v=phi*k;if(v>=(float)len)v-=(float)len;if(v<0.f)v=0.f;x->srci=(uint32_t)v;x->srcf=v-(float)x->srci;}
-                    x->rate=s->r*k;
+                    if(!i) {
+                        float v=phi*k,L=(float)len;if(v>=L)v-=L;if(v<0.f)v=0.f;
+                        float e=v-((float)x->srci+x->srcf);
+                        if(e>L*.5f)e-=L;else if(e<-L*.5f)e+=L;
+                        float base=s->r*k;
+                        if(e>2400.f || e<-2400.f){x->srci=(uint32_t)v;x->srcf=v-(float)x->srci;x->rate=base;x->vi=0.f;}
+                        else {
+                            x->vi+=e*(1.f/(4800.f*750.f));
+                            if(x->vi>.1f)x->vi=.1f;
+                            if(x->vi<-.1f)x->vi=-.1f;
+                            float c=e*(1.f/4800.f)+x->vi;
+                            if(c>.1f)c=.1f;
+                            if(c<-.1f)c=-.1f;
+                            x->rate=base*(1.f+c);
+                        }
+                    }
                     uint32_t w=x->srci;if(w>=len)w=0;
                     pl_x_frame(p,x,buffer,len,&l,&r);
                     if(state==PL_DUB && dub>0.f){int16_t *q=buffer+2u*w;q[0]=pl_q(pl_f(q[0])+in_l[i]*dub);q[1]=pl_q(pl_f(q[1])+in_r[i]*dub);}
