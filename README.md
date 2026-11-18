@@ -78,9 +78,24 @@ On the bluebox the CPU bar stays green with Keep + Tape + Ping.
 
 ## Hardware testing (one device)
 
-All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with `e7dd3237…` (header tempo, the photos below), `f4fab10b…` (version 12), `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `c2c58e04…`, `e7dd3237…` (header tempo with the decimal), `f4fab10b…` (version 12), `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
 
-Build `e7dd3237…`, clocked by the Blackbox (the current build `c2c58e04…` differs only in showing the header tempo rounded, e.g. `3:2 126`):
+Current build (`c2c58e04…`), clocked by the Blackbox at 128 and then 126 BPM:
+
+| | |
+|---|---|
+| ![Empty, tempo in title and header](images/hardware/v14-1-empty-tempo.jpg) | ![ARMED](images/hardware/v14-2-armed.jpg) |
+| **Empty:** title `Lp128.1`, header `3:4 128` (rounded). Time `1 bar` | **ARMED:** REC pressed with the song playing, waiting for the bar line |
+| ![REC 1/2](images/hardware/v14-3-rec-1-of-2.jpg) | ![REC 2/2](images/hardware/v14-4-rec-2-of-2.jpg) |
+| **REC 1/2** from the bar line (`8:2`) | **REC 2/2** |
+| ![PLAY, OVDUB, Warp](images/hardware/v14-5-play-ovdub-warp.jpg) | ![Echo type Duck](images/hardware/v14-6-echo-duck.jpg) |
+| **PLAY:** button reads `OVDUB`; knob group 2 selected: Time `1/8D`, Type `Warp` | Echo Type `Duck` |
+| ![Echo type Delay](images/hardware/v14-7-echo-delay.jpg) | ![126 BPM, Keep](images/hardware/v14-8-126bpm-keep.jpg) |
+| Echo Type `Delay` | **Tempo change:** the Blackbox at 126, header `52:2 126`; Stretch `Keep`, Ping on |
+| ![126 BPM, Vari](images/hardware/v14-9-126bpm-vari.jpg) | |
+| Stretch `Vari` at 126 | |
+
+Build `e7dd3237…` (header tempo with the clipped decimal), clocked by the Blackbox:
 
 | | |
 |---|---|
@@ -126,7 +141,8 @@ Confirmed on that unit:
 - with the Blackbox as master clock, the loop follows project changes with slightly different tempos (e.g. 126 → 128), and the looper detects the external tempo and records the next loop in sync without touching the bluebox BPM (`1438c1ad…`);
 - 2-bar takes at 128 BPM on the bar lines: ARMED, REC 1/2, REC 2/2, PLAY (photos above);
 - version 10 (`3f14345a…`) installed and tested: Echo on the loop, the new page layout and knob groups, transport stop, OVDUB and the Sync lock;
-- build `e7dd3237…`: the detected tempo in the header (decimal clipped by the label, see above; rounded in the current build `c2c58e04…`), 2-bar takes on the bar lines, OVDUB, the knob groups on the physical knobs, echo types Warp and Delay, Ping, and the loop following a tempo change to 128 with Stretch Keep (photos above);
+- current build `c2c58e04…`: the header tempo rounded to whole BPM (`128`, `126`), ARMED, REC 1/2 and 2/2 on the bar lines, OVDUB, echo types Warp, Duck and Delay, Ping, and the loop following the Blackbox from 128 to 126 with Stretch Keep and Vari (photos above);
+- build `e7dd3237…`: the detected tempo in the header (decimal clipped by the label), 2-bar takes on the bar lines, OVDUB, the knob groups on the physical knobs, echo types Warp and Delay, Ping, and the loop following a tempo change to 128 with Stretch Keep (photos above);
 - the echo Type knob and the CPU: the CPU bar stays green with Stretch Keep, Tape echo and Ping (version 11), and the current build `f4fab10b…` with the smooth Vari/Keep lock;
 - known: REC or CLEAR pressed within a few seconds of a project/bank change (e.g. the Blackbox switching projects) can stay lit, because Cobalt pauses its button and mixer upkeep during loads; the next press only turns it off;
 - the free arena when FX1 is built is only about 1 MB, so the looper uses the tested 768,000-byte buffer: 4 s, which is 2 bars at 120 BPM or faster. An earlier 32-bit build fell back to 1 bar for this reason (title `REC 1/1`).
