@@ -319,4 +319,29 @@ if LOOPER_BUILD:
   w32(u,NOW,int(round(t))+rnd.choice((-1,0,1)));din_in([0xf8]);got();t+=60000.0/120/24
  check(abs(tline()[7]-12000)<=6,'120 BPM clock with +/-1 ms jitter on every tick measures %.2f BPM'%(tline()[7]/100))
 
+if LOOPER_BUILD:
+ # Header tempo in any FX1 mode: measured on the M4 from the song position
+ # the bar:beat display uses, through the real pc_main loop (UI pass every 7 ms).
+ ENG=0x24060000
+ w32(u,0x3000a894,ENG);u.mem_write(0x300173d0+0x7408,b'\x01')
+ u.mem_write(TEMPO+28,struct.pack('<I',0))         # no MIDI clock tempo
+ check(call(u,0x8120234,taddr(0x14),0x1a0)!=1,'FX1 is not on the Phrase Looper for this check')
+ HB=0x24061000
+ def header(bar,beat):
+  u.mem_write(HB,bytes(16));u.mem_write(0x2407f000,struct.pack('<I',beat))
+  call(u,PC['lp_header_bar'],HB,16,0x8146998,bar)
+  return bytes(u.mem_read(HB,16)).split(b'\0')[0].decode()
+ def song(bpm,ms,pos):
+  for _ in range(int(ms/7)):
+   pos+=7*bpm*960/60000.0;w32(u,ENG+0x78b0,int(pos)&0xffffffff);main(7)
+  return pos
+ check(header(1,1)=='1:1','before the song has run: header unchanged (%s)'%header(1,1))
+ pos=song(126.0,6000,0.0);h1=header(13,1)
+ pos=song(128.0,8000,pos);h2=header(13,1)
+ pos=song(122.37,8000,pos);h3=header(13,1)
+ for _ in range(60):main(7)                          # stopped: last value kept
+ h4=header(14,1)
+ print('INFO header (FX1 not looper):',h1,'|',h2,'|',h3,'|',h4)
+ check((h1,h2,h3,h4)==('13:1 126.0','13:1 128.0','13:1 122.4','14:1 122.4'),'header shows the tempo measured from the song position in any FX1 mode: 126, 128, 122.37 -> 122.4, kept while stopped')
+
 print(H.checks,"checks passed")

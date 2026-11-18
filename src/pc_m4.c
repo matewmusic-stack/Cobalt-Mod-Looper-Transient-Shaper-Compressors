@@ -21,6 +21,7 @@ static void sc_boot(void);
 #ifdef PHRASE_LOOPER
 static void lp_boot(void);
 void lp_main(int loading);
+static void lp_song_tempo(void);
 #endif
 #define PC_TAG0 0x20bu
 #define PC_SLOTS 128u
@@ -360,6 +361,7 @@ void pc_main(void *inputs) {
     }
     sc_main(pc_loading() || t->phase || (s->want&PC_MSG));
 #ifdef PHRASE_LOOPER
+    lp_song_tempo();
     lp_main(pc_loading() || t->phase || (s->want&PC_MSG));
 #endif
     pc_quicksave(now);
@@ -912,6 +914,9 @@ struct sc_bank {
     /* Looper: MIDI clock tempo. Ticks of the clock owner (mo_next, TIM4 IRQ),
      * the UI ms time of every 24th (one beat), and the smoothed result. */
     uint32_t lp_ticks,lp_last,lp_idx,lp_n,lp_beat[9],lp_x100;
+    /* Header tempo in every FX1 mode: the song position (960 ticks per beat)
+     * and the UI ms clock at each of the last 8 beat crossings. */
+    int32_t hm_last,hm_beat,hm_tick[8];uint32_t hm_moved,hm_n,hm_ms[8],hm_x100;
 #endif
 };
 struct sc_ptr {uint32_t magic;struct sc_bank *bank;};
@@ -977,6 +982,7 @@ static void sc_boot(void) {
     b->mo_dumping=0;b->mo_cursor=0;b->mo_busy_since=0;b->mo_din=0;b->mo_to=0;b->mo_clk_src=0;b->mo_clk_at=0;b->mo_clk_usb=0;b->mo_clk_seen=0;
 #ifdef PHRASE_LOOPER
     b->lp_ticks=0;b->lp_last=0;b->lp_idx=0;b->lp_n=0;b->lp_x100=0;
+    b->hm_last=0;b->hm_beat=0;b->hm_moved=0;b->hm_n=0;b->hm_x100=0;
 #endif
     b->magic=SC_MAGIC;
     p->bank=b;p->magic=SC_MAGIC;
@@ -1090,17 +1096,47 @@ static void lp_boot(void) {backup_enable();PWR_CR1|=1u<<8;LP_TEMPO->muted=0;}
 #define LP_HELD 0x40000000u
 #define LP_UI_PANEL (*(uint8_t *volatile *)0x38800b04u)   /* fx_ui.panel: the FX page */
 #define LP_UI_TICKED (*(volatile uint32_t *)0x38800b94u)  /* fx_ui.ticked: the looper page is showing */
-/* Header: the tempo the looper detects, right of the bar count ("13:1 128.0").
+/* Tempo from the song position, measured on the M4 in every FX1 mode, for
+ * the header: each pass of the UI loop reads the position the bar:beat
+ * display uses; at each new beat it stores the position and the UI ms
+ * clock, and the tempo is ticks per ms over the last 2 to 7 beats (the
+ * position is read and the clock taken together, so the error is ~1 ms
+ * over seconds). A jump of more than a beat (start, locate) restarts the
+ * window; the last value is kept while stopped. */
+static int32_t lp_fdiv(int32_t a,int32_t b){int32_t q=a/b;if((a%b)<0)q--;return q;}
+static void lp_song_tempo(void) {
+    struct sc_bank *b=sc_bank();
+    if(!b)return;
+    uint32_t e=*(volatile uint32_t *)0x3000a894u,now=PC_UI_NOW;
+    if(!pc_ram(e,0x7900u))return;
+    int32_t ticks=*(volatile int32_t *)(e+(*(volatile uint8_t *)(0x300173d0u+0x7408u)?0x78b0u:0x78b8u));
+    if(ticks==b->hm_last){if(now-b->hm_moved>300u)b->hm_n=0;return;}
+    int32_t d=ticks-b->hm_last;
+    if(d<0 || d>960 || now-b->hm_moved>300u)b->hm_n=0;
+    b->hm_last=ticks;b->hm_moved=now;
+    int32_t beat=lp_fdiv(ticks,960);
+    if(b->hm_n && beat==b->hm_beat)return;
+    unsigned k=b->hm_n%8u;
+    b->hm_tick[k]=ticks;b->hm_ms[k]=now;b->hm_beat=beat;b->hm_n++;
+    if(b->hm_n<3u)return;
+    unsigned o=b->hm_n>8u?b->hm_n%8u:0u;
+    int32_t dt=ticks-b->hm_tick[o];uint32_t ms=now-b->hm_ms[o];
+    if(dt<=0 || !ms)return;
+    uint32_t x=((uint32_t)dt*6250u+ms/2u)/ms;  /* ticks/ms x 62.5 = BPM; x100 */
+    if(x>=2000u && x<=30000u)b->hm_x100=x;
+}
+/* Header: the detected tempo, right of the bar count ("13:1 128.0").
  * Replaces the header's snprintf(buf,16,"%d:%d",bar,beat) call (0x08139810);
  * the next header label is placed after this text's measured width. The
- * tempo is the one measured from the song position (Phrase Looper selected
- * in FX1), else the incoming MIDI clock; nothing is added without either. */
+ * tempo: with the Phrase Looper in FX1, its sample-accurate measurement;
+ * otherwise the M4's (lp_song_tempo); else the incoming MIDI clock. */
 void lp_header_bar(char *buf,unsigned n,const char *fmt,int bar,int beat) {
     ((int (*)(char *,unsigned,const char *,...))0x08143777u)(buf,n,fmt,bar,beat);
     backup_enable();
     uint32_t x=0;
     uint8_t *fx1=sc_table(0x14u);
     if(*(void *const *)(fx1+4) && fw_get(fx1,0x1a0u)==1 && LP_PL->magic==PL_MAGIC)x=LP_PL->song_x100;
+    if(!x){struct sc_bank *b=sc_bank();if(b)x=b->hm_x100;}
     if(!x && LP_TEMPO->magic==PL_TEMPO_MAGIC)x=LP_TEMPO->clock_x100;
     unsigned t=(x+5u)/10u;                      /* tenths of a BPM */
     if(t<200u || t>3000u)return;
