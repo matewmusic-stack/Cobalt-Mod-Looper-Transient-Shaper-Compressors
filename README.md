@@ -398,7 +398,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 The looper is built as a separate firmware variant. The default build is unchanged: it still reproduces the released Cobalt 1.2.0 image (SHA-256 `c28981e5…`), and `patch_bluebox.html` and `docs/index.html` stay Cobalt-only.
 
-**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)** publishes the current build (default theme SHA-256 `1438c1ad…`): locked to the song position, bar-quantized REC, Stretch, and tempo measured from the song position, so it follows an external master clock. This build has been tried on hardware. Drop in the original desktop 1.5.2 `BLUEBOX.BIN`; everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN`. **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included. `LOOPER=1 ./build.sh` does not touch the live page; `LOOPER=1 PUBLISH=1 ./build.sh` replaces `docs/looper/index.html` when a build is ready.
+**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)** publishes the current build (default theme SHA-256 `3f14345a…`): locked to the song position, bar-quantized REC, Stretch, tempo measured from the song position (so it follows an external master clock), the loop following the transport, and Echo, the stock FX1 delay played on the loop. This build has been tried on hardware. Drop in the original desktop 1.5.2 `BLUEBOX.BIN`; everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN`. **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included. `LOOPER=1 ./build.sh` does not touch the live page; `LOOPER=1 PUBLISH=1 ./build.sh` replaces `docs/looper/index.html` when a build is ready.
 
 ```sh
 # Arm GNU Toolchain 13.2.Rel1 on PATH, as for the normal build
@@ -413,27 +413,40 @@ cc -std=c11 -O1 -Wall -Wextra -Werror -DPHRASE_LOOPER -Isrc tests/looper_host.c 
 
 Turn up the FX1 send on the tracks to loop and select **Phrase Looper** in the FX1 mode list (where Granular was). The FX1 title shows the state: `Looper` (empty), `ARMED`, `REC 1/2`, `PLAY`, `DUB` or `STOP`. Once the looper has measured a tempo, the empty title shows it instead, for example `Lp128.0`.
 
+Page layout. The physical knobs turn the knobs of one highlighted group of four list entries; buttons are never on them.
+
+| Left | Knob group 1 | Knob group 2 | Right |
+|---|---|---|---|
+| REC / OVDUB (top) | Bars, Stretch | Time, Echo | (empty) |
+| CLEAR (below) | Level | Feedb, Ping | Sync |
+
+The loop follows the bluebox transport: Stop (the button, or the external master stopping) stops the loop, and Play plays it again in step with the song. There is no on-screen STOP and no Dub knob: they were too easy to hit during a set, and overdubs are layered at full level.
+
 | Control | Kind | What it does |
 |---|---|---|
-| REC | button | Empty: record; at the end of the bars the loop plays by itself. Recording: close the loop now. Playing: overdub on/off. Stopped: play from the start. |
-| STOP | button | Stop. When stopped, play from the start. During a take, keep what was recorded. |
+| REC | button | Empty: record (on the next bar line while the sequencer plays); at the end of the bars the loop plays by itself. Recording: end on the next bar line. Once a loop exists the button reads **OVDUB**: overdub on/off (a stopped loop overdubs from the start). |
 | CLEAR | button | Empty the loop. |
-| Sync | on/off (default off) | On: with the sequencer stopped, REC arms and recording starts when it starts. REC again cancels. |
+| Sync | on/off (default off) | On: with the sequencer stopped, REC arms and recording starts when it starts. REC again cancels. Locked while a loop exists: a change is put back at once. |
 | Bars | 1 or 2 (default 2) | Loop length in 4/4 bars at the current tempo, measured from the song position, so an external master (e.g. a Blackbox) is followed without setting the bluebox BPM. Before the sequencer has run: the MIDI clock or the project BPM. |
 | Level | 0–100 % (default 100 %) | Loop volume on the FX1 return. The return carries only the loop. |
-| Dub | 0–100 % (default 100 %) | How loud new input is layered while overdubbing. |
 | Stretch | Off / Vari / Keep (default Off) | What the loop does when the tempo changes after recording. Off: keeps its recorded speed. Vari: varispeed, stays in time and the pitch follows the tempo. Keep: stays in time at the same pitch (WSOLA time-stretch). |
+| Time | delay time | The stock delay's Time: a note division while Beat Sync is on (default), so the echoes follow the tempo; ms when off. Beat Sync, Filter, Drift etc. come from the Delay page. |
+| Feedb | 0–100 % | Stock delay feedback: how many repeats. |
+| Echo | 0–100 % (default 0 = off) | How much of the loop goes into the stock delay. The FX1 return carries loop + echoes. Back to 0, the echoes ring out, then the delay is skipped again. |
+| Ping | on/off | Stock ping-pong: repeats alternate left and right. |
 
-REC, STOP and CLEAR are pedal-style: the M7 counts a press when a button goes from 0 to 1 in the FX1 event queue, and the M4 sets it back to 0 at once, so the buttons never stay lit. A value seen before the first one, such as a project load, only latches. STOP uses a new FX1 parameter, `0x1ba` (`lpstop`), in an empty stock definition slot; it is hidden in the other FX1 modes.
+**Echo.** With Echo above 0 and the looper fully faded in, the stock FX1 delay is no longer skipped: the loop is rendered first, written into the delay's bus at the Echo level, the stock delay body runs on it, and the loop is added back to the echoes. No memory is added (the stock delay's rings already exist; the ring-clear state machine keeps stale audio out when it resumes). Echo is a new parameter, `0x1bc` (`lpecho`), in an empty stock slot. Measured on the firmware in the emulator (`tests/test_looper_echo.py`): a click returns exactly as the stock impulse response; worst block 8.3k instructions with Echo, 15.3k with Echo, Ping and Keep stretch (tested Granular: 14.8k–16.8k).
 
-Auto-mute: while the loop plays, the M4 mutes the tracks whose FX1 send is above 0 and that were not already muted. It uses the same native knob call as Scenes recall, so the Mute buttons, the saved project and the audio engine all follow. Those tracks are unmuted while recording or overdubbing, and on STOP, CLEAR or leaving the mode. A track the user unmutes during playback stays unmuted, and tracks the user muted are never touched. The record of muted tracks is cleared at boot and on project or bank loads, without unmuting anything.
+REC, STOP and CLEAR are pedal-style: the M7 counts a press when a button goes from 0 to 1 in the FX1 event queue, and the M4 sets it back to 0 at once, so the buttons never stay lit. A value seen before the first one, such as a project load, only latches. STOP uses a new FX1 parameter, `0x1ba` (`lpstop`), in an empty stock definition slot; it is no longer on the page (the transport stops the loop).
+
+Auto-mute: while the loop plays, the M4 mutes the tracks whose FX1 send is above 0 and that were not already muted. It uses the same native knob call as Scenes recall, so the Mute buttons, the saved project and the audio engine all follow. Those tracks are unmuted while recording or overdubbing, and on stop, CLEAR or leaving the mode. A track the user unmutes during playback stays unmuted, and tracks the user muted are never touched. The record of muted tracks is cleared at boot and on project or bank loads, without unmuting anything.
 
 How it works: the looper uses the Granular SDRAM buffer, allocated once when FX1 is built and before FX2. Loop audio is stored as 16-bit stereo, scaled so ±2.0 (overdub headroom) fills the range, at 4 bytes per frame. The hardware-tested Granular size (768,000 bytes) therefore holds 4 s: 2 bars at 120 BPM. When more SDRAM is free than that plus a 4 MB reserve, the buffer grows to whatever fits, up to 2 bars at 60 BPM (1,536,000 bytes). Longer loops drop to 1 bar, then to the buffer length. The TOOLS middle field shows the longest loop and the arena space that was free for it at boot, for example `Cblt L4.0s F3.1M`. On the first hardware test the old 32-bit buffer could not get its 7 MB and fell back to 2 s, so 2 bars became 1. The M4 publishes the project BPM (setting `0x85`, plain BPM 40–250), the sequencer state, its mute record and the measured MIDI clock tempo to backup SRAM `0x38800EE0`. The M7 looper state lives at `0x38800EA0`, and its first cache line is cleaned after every block for the M4 (title and auto-mute). FX2 and the bootloader are not patched. Leaving the looper mode empties the loop.
 
 **Sync to the sequencer.** The looper follows the bluebox's song position, the 960-ticks-per-beat count behind the `bar:beat` display. On the M7, each block reads `*(0x3000a894)+0x78b0` (or `+0x78b8`, by the app flag `+0x7408`, as the display does). It keeps its own sample-accurate position from the tempo, pulled 1/8 of the way toward each new value; a jump of more than one beat (start, locate) is taken at once.
 
 - **REC with the sequencer running** waits for the next bar line (ARMED). The take ends on the bar line Bars bars later, so it is exactly that many bars of song time. When the sequencer is stopped, Sync on waits for the start, and Sync off records at once (free). A bar-line wait whose sequencer stops falls back to recording at once. A take started by the sequencer starting begins when the position first moves, up to one block (0.7 ms) after the downbeat.
-- **Playback while the sequencer runs** is locked to the song: Off plays 1:1 and restarts on every loop cycle, and Vari and Keep map the whole loop onto the cycle. A free loop locks where it is when the sequencer starts. When stopped, the loop plays freely.
+- **Playback while the sequencer runs** is locked to the song: Off plays 1:1 and restarts on every loop cycle, and Vari and Keep map the whole loop onto the cycle. A free loop locks where it is when the sequencer starts. When the transport stops, the loop stops; when it starts, the loop plays in step with the song.
 - **2 bars on the tested 4 s buffer** fit exactly at 120 BPM. A sequencer up to 1% slower ends the take at the buffer, still locked.
 - Measured on the firmware in the emulator (`tests/test_looper_sync.py`): with the sequencer 0.5% off the stated tempo, 20 restarts in 20 bars, the worst 0.68 ticks (17 µs) from the bar line. With the position updated only every 3rd block with ±2 ticks of noise, the worst is 0.84 ticks. After a 120 → 128 BPM change, Off restarts within 0.45 ticks of each bar line, and Vari and Keep stay within 23 samples of the song phase. The worst block is 11.9k instructions (the tested Granular: 14.8k+).
 
@@ -454,12 +467,12 @@ At the recorded tempo both modes play the loop unchanged. While stretched, overd
 
 ### Hardware testing (one device)
 
-All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `1438c1ad…`, `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `3f14345a…`, `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
 
 | | |
 |---|---|
 | ![FX1 mode menu](images/hardware/fx1-mode-menu.jpg) | ![Empty looper](images/hardware/looper-page-empty.jpg) |
-| **FX1 menu (B):** Phrase Looper in place of Granular | **Looper page, empty:** title `Looper`; Bars, Level and Dub knobs; REC, STOP, CLEAR and Sync |
+| **FX1 menu (B):** Phrase Looper in place of Granular | **Looper page, empty (earlier build):** title `Looper`; Bars, Level and Dub knobs; REC, STOP, CLEAR and Sync |
 | ![Looper page, 1 bar](images/hardware/looper-page-1-bar.jpg) | ![Looper page, 2 bars](images/hardware/looper-page-2-bars.jpg) |
 | **Bars = 1 bar,** title `STOP` | **Bars = 2 bars,** title `STOP`, Sync on |
 | ![TOOLS capacity readout](images/hardware/tools-capacity-readout.jpg) | |
@@ -472,6 +485,7 @@ Confirmed on that unit:
 - tempo: a 1-bar loop at 120 BPM lasts 2 s (earlier build);
 - with the sequencer running, REC waits for the bar line, and the loop stays on the beat over many passes (`73d9066f…`);
 - with the Blackbox as master clock, the loop follows project changes with slightly different tempos (e.g. 126 → 128), and the looper detects the external tempo and records the next loop in sync without touching the bluebox BPM (`1438c1ad…`);
+- version 10 (`3f14345a…`) installed and tested: Echo on the loop, the new page layout and knob groups, transport stop, OVDUB and the Sync lock;
 - the free arena when FX1 is built is only about 1 MB, so the looper uses the tested 768,000-byte buffer: 4 s, which is 2 bars at 120 BPM or faster. An earlier 32-bit build fell back to 1 bar for this reason (title `REC 1/1`).
 
 Not yet confirmed on hardware:

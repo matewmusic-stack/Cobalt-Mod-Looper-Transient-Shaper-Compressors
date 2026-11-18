@@ -83,16 +83,18 @@ kbd{font:600 12px ui-monospace,Menlo,monospace;background:var(--panel2);border:1
 <p class="muted">Turn up the FX1 send on the track(s) you want to loop, open FX1 and choose <b>Phrase Looper</b> (where Granular was). The FX1 title shows the state: Looper, ARMED, REC 1/2, PLAY, DUB or STOP. Empty, it shows the tempo the looper measured, e.g. Lp128.0.</p>
 <p class="muted">With the sequencer playing, REC waits for the next bar line and records exactly the set bars; the loop stays locked to the song position. The tempo is measured from the song position, so an external master clock (such as a Blackbox) is followed without setting the bluebox BPM.</p>
 <table class="looper-table">
-<tr><th>REC</th><td>Empty: record (on the next bar line while the sequencer plays). At the end of the bars the loop plays by itself. Recording: end on the next bar line. Playing: overdub on / off. Stopped: play.</td></tr>
-<tr><th>STOP</th><td>Stop. Press again to play from the start. Stopping during a take keeps it.</td></tr>
+<tr><th>REC / OVDUB</th><td>Empty: record (on the next bar line while the sequencer plays). At the end of the bars the loop plays by itself. Recording: end on the next bar line. Once a loop exists the button reads OVDUB: overdub on / off.</td></tr>
+<tr><th>Transport</th><td>The bluebox (or master clock) Stop stops the loop; Play plays it again in step with the song. There is no on-screen STOP.</td></tr>
 <tr><th>CLEAR</th><td>Empty the loop.</td></tr>
-<tr><th>Sync</th><td>On: with the sequencer stopped, REC waits and recording starts when you press start.</td></tr>
+<tr><th>Sync</th><td>On: with the sequencer stopped, REC waits and recording starts when you press start. Locked while a loop exists.</td></tr>
 <tr><th>Bars</th><td>1 or 2 bars at the tempo measured from the song position (before the sequencer has run: MIDI clock or project BPM).</td></tr>
 <tr><th>Level</th><td>Loop volume. The FX1 return carries only the loop.</td></tr>
-<tr><th>Dub</th><td>How loud new playing is layered while overdubbing.</td></tr>
 <tr><th>Stretch</th><td>What the loop does when the tempo changes after recording. <b>Off</b>: keeps its recorded speed and restarts on every loop cycle. <b>Vari</b>: plays faster or slower to stay in time, and the pitch moves with it, like tape (&plusmn;8 BPM at 120 is about &plusmn;1 semitone). <b>Keep</b>: stays in time at the same pitch, with slight graininess on sustained notes.</td></tr>
+<tr><th>Time / Feedb</th><td>The stock delay, played on the loop: Time (a note division with Beat Sync on) and feedback. Other delay settings come from the Delay page.</td></tr>
+<tr><th>Echo</th><td>How much of the loop goes into the delay; 0 = off. The FX1 return carries the loop plus its echoes.</td></tr>
+<tr><th>Ping</th><td>Echoes alternate left and right.</td></tr>
 </table>
-<p class="muted">REC, STOP and CLEAR act once per press and never stay lit. While the loop plays, the tracks feeding FX1 are muted automatically, so you hear only the loop. They are unmuted while you record or overdub, and when you stop, clear or leave the looper. Tracks you muted yourself are never touched.</p>
+<p class="muted">REC and CLEAR act once per press and never stay lit. While the loop plays, the tracks feeding FX1 are muted automatically, so you hear only the loop. They are unmuted while you record or overdub, and when you stop, clear or leave the looper. Tracks you muted yourself are never touched.</p>
 <p class="muted">Loops are stored as 16-bit audio. The TOOLS page shows the longest loop, for example <code>Cblt L4.0s</code>: 4 seconds is 2 bars at 120 BPM or faster. When 2 bars don’t fit, the loop is 1 bar and the title shows REC 1/1. Switching FX1 to another mode empties the loop.</p>
 </section>
 <section id="guide"><h2>Using scenes and MIDI</h2><p class="muted">What the new v1.1 features do on the device, step by step. The screens use your theme.</p><div class="tabs" id="guideTabs" role="group" aria-label="Guide topic"></div><div class="guide"><div id="guideBody"></div><div class="screen"><svg id="guideScreen" viewBox="0 0 320 240" role="img" aria-label="Bluebox screen for this topic"></svg></div></div></section>
