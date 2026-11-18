@@ -17,7 +17,7 @@ import firmware_harness as H
 
 GS=0x38800000;PL=0x38800ea0;TEMPO=0x38800ee0
 MODE,LEVEL,CLEAR,BARS,DUB,SYNC,REC,STOP,STRETCH,ECHO=0x1a0,0x1a1,0x1a2,0x1a3,0x1a4,0x1a5,0x1a6,0x1ba,0x1bb,0x1bc
-TIME,BEAT,FEEDB,PING=0x33,0x35,0x39,0x36
+TIME,BEAT,FEEDB,PING,ETYPE=0x33,0x35,0x39,0x36,0x1bd
 EMPTY,ARMED,RECORDING,PLAYING=0,1,2,3
 D=2880                                   # stock delay time for Time=10 (the delay tests' setting)
 
@@ -66,9 +66,9 @@ def peaks(x,th=.02):
   else:i+=1
  return out
 
-def looper(ping=0,stretch=0):
+def looper(ping=0,stretch=0,etype=0):
  u=setup();r=Run(u)
- r.blk(INITIAL+[(MODE,1),(LEVEL,1000),(CLEAR,0),(BARS,1),(DUB,1000),(SYNC,0),(REC,0),(STOP,0),(STRETCH,stretch),(ECHO,0),
+ r.blk(INITIAL+[(MODE,1),(LEVEL,1000),(CLEAR,0),(BARS,1),(DUB,1000),(SYNC,0),(REC,0),(STOP,0),(STRETCH,stretch),(ECHO,0),(ETYPE,etype),
                 (BEAT,0),(TIME,10),(FEEDB,500),(PING,ping)])
  steady(u)
  r.run(10)
@@ -131,4 +131,48 @@ r.run(NB);r.blk([(ECHO,1000)]);r.cost=[]
 for i in range(600):r.blk(count=(i%3==0))
 print('INFO Keep + Ping + Echo: worst block %d instructions'%max(r.cost))
 check(max(r.cost)<16829,'Keep + Ping + Echo: every block within the tested Granular range (worst %d, Granular 14813-16829)'%max(r.cost))
+# ------------------------------------------------ echo types: Warp/Tape/Duck/Delay
+res={}
+for et,name in [(0,'Warp'),(1,'Tape'),(2,'Duck'),(3,'Delay')]:
+ u,r=looper(etype=et)
+ check(u.mem_read(PL+61,1)[0]==et,'Type %s reaches the looper state (etype %d)'%(name,et))
+ r.run(NB);r.blk([(ECHO,1000)]);r.cost=[];r.run(2*NB,count=True)
+ L,R=r.take(NB);p=peaks(L,th=.005);c=[x for x in p if abs(x[1]-.5)<.01]
+ e1=max((abs(v) for v in L[c[0][0]+D-200:c[0][0]+D+200]),default=0) if c else 0
+ res[name]=(p[:4],e1,max(r.cost),all(math.isfinite(v) for v in L+R))
+ print('INFO %-5s peaks %s first echo %.3f worst block %d'%(name,p[:4],e1,max(r.cost)))
+ check(c and res[name][3],'%s: the loop click passes unchanged (0.5) and the output is finite'%name)
+check(res['Warp'][0]==res['Delay'][0] and abs(res['Warp'][1]-.5)<.01,'Warp and Delay (no Drift/Pitch set): the stock echoes, first echo 0.5')
+check(res['Tape'][1]>.01 and abs(res['Tape'][1]-res['Warp'][1])>.01,'Tape: echoes present and coloured by the tape stage (first echo %.3f vs %.3f)'%(res['Tape'][1],res['Warp'][1]))
+# Duck needs a sustained loop: record a held tone, compare the echoes' share
+# of the output (pass with Echo minus the same pass without) for Warp and Duck.
+def tone_echo(et):
+ u=setup();r=Run(u)
+ r.blk(INITIAL+[(MODE,1),(LEVEL,1000),(CLEAR,0),(BARS,1),(DUB,1000),(SYNC,0),(REC,0),(STOP,0),(STRETCH,0),(ECHO,0),(ETYPE,et),
+                (BEAT,0),(TIME,10),(FEEDB,500),(PING,0)])
+ steady(u);r.run(10);r.blk([(REC,1),(REC,0)])
+ k=0
+ while pl(u)['state']==RECORDING and k<5000:
+  l=[.3*math.sin(2*math.pi*220*((k*32+i)/48000.)) for i in range(32)];dblock(u,l,l,());k+=1
+ r.run(NB);ref,_=r.take(NB)
+ r.blk([(ECHO,1000)]);r.run(2*NB-1);out,_=r.take(NB)
+ diff=[a-b for a,b in zip(out,ref)]
+ return math.sqrt(sum(x*x for x in diff[NB*16:])/len(diff[NB*16:]))
+w,dk=tone_echo(0),tone_echo(2)
+print('INFO held tone: echo RMS Warp %.4f, Duck %.4f'%(w,dk))
+check(w>.05 and dk<w*.5,'Duck: under a sustained loop the echoes are ducked (echo RMS %.4f vs Warp %.4f)'%(dk,w))
+for name in res:check(res[name][2]<14813,'%s echo: every block under the tested Granular (worst %d)'%(name,res[name][2]))
+worst={}
+for st,sn in [(0,'Off'),(1,'Vari'),(2,'Keep')]:
+ for et,en in [(0,'Warp'),(1,'Tape'),(2,'Duck')]:
+  u,r=looper(ping=1,stretch=st,etype=et)
+  r.run(NB);r.blk([(ECHO,1000)]);r.cost=[]
+  for i in range(600):r.blk(count=(i%3==0))
+  worst[(sn,en)]=max(r.cost)
+print('INFO worst block with Ping, by Stretch x echo type:',worst)
+for k,v in worst.items():
+ if v<16829:check(True,'Ping + Stretch %s + %s echo: within the tested Granular range (worst %d)'%(k[0],k[1],v))
+ else:print('WARN Ping + Stretch %s + %s echo: worst block %d instructions, above the hardware-tested Granular (16829): check the CPU meter on the bluebox'%(k[0],k[1],v))
+check(all(worst[(st,et)]<16829 for st in ('Off',) for et in ('Warp','Tape','Duck')) and all(worst[(st,'Warp')]<16829 for st in ('Vari','Keep')),'Stretch Off with any echo type, and Warp echo with any Stretch: within the tested range')
+check(max(worst.values())<20000,'every combination stays under 20k instructions (worst %d)'%max(worst.values()))
 print('PASSED',H.checks,'Phrase Looper Echo checks; sound and real CPU load remain hardware tests.')

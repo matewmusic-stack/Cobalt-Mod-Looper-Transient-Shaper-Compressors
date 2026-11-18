@@ -26,6 +26,19 @@ struct delay_types {
  * then skipped, so existing Tape projects are bit-identical. State does not
  * fit the 496-byte delay-types block; the firmware places it in free backup
  * SRAM (XL_STATE), hosts use a static instance. */
+/* The type whose extras run. In the looper build, FX1 mode 1 is the Phrase
+ * Looper, whose echoes (the stock delay on the loop) take the type chosen
+ * on the looper page: struct phrase_looper.etype, the byte at 0x38800edd
+ * (0 Warp, 1 Tape, 2 Ducked, 3 Delay). Reverse needs the loop's buffer. */
+#ifdef PHRASE_LOOPER
+static inline int x_kind(const struct delay_types *x) {
+    if(x->mode!=1)return x->mode;
+    unsigned t=*(const volatile uint8_t *)0x38800eddu;
+    return t==1u?2:t==2u?3:t==3u?5:0;
+}
+#else
+#define x_kind(x) ((x)->mode)
+#endif
 struct x_locut {uint32_t magic;int32_t hz;float b0,b1,m0,m1;float hp[6];uint32_t valid;};
 #define XL_MAGIC 0x584c4331u
 #ifndef XL_STATE
@@ -71,7 +84,7 @@ static inline void x_prepare(struct delay_types *x,unsigned n) {
     x->wild1=x_move(x->wild1,x->wild?1.f:0.f,(float)n/240.f);
     if(!x->wild0 && !x->wild1)x->wild_valid=0;
     x->tape0=x->tape1;
-    x->tape1=x_move(x->tape1,x->mode==2?1.f:0.f,(float)n/240.f);
+    x->tape1=x_move(x->tape1,x_kind(x)==2?1.f:0.f,(float)n/240.f);
     x->drive0=x->drive_sm;
     float amount=(float)x->drive*.001f,step=(float)n/960.f;
     if(step>1.f)step=1.f;
@@ -182,13 +195,13 @@ static inline void x_tape_return(struct delay_types *x,float *l,float *r,unsigne
 /* The detector sees the FX1 input before the native delay mutates it. Only
  * the return is attenuated; the native feedback loop continues underneath. */
 static inline void x_duck(struct delay_types *x,const float *il,const float *ir,float *l,float *r,unsigned n) {
-    if(x->mode!=3 && x->duck_mix==0.f)return;
+    if(x_kind(x)!=3 && x->duck_mix==0.f)return;
     float depth=(float)x->duck*.001f,release=1.f/((float)x->release*48.f);
     for(unsigned i=0;i<n;i++) {
         float a=g_abs(g_limit(il[i])),b=g_abs(g_limit(ir[i]));if(b>a)a=b;
         float c=a>x->envelope?.01f:release;
         x->envelope+=(a-x->envelope)*c;
-        x->duck_mix=x_move(x->duck_mix,x->mode==3?1.f:0.f,1.f/240.f);
+        x->duck_mix=x_move(x->duck_mix,x_kind(x)==3?1.f:0.f,1.f/240.f);
         float gain=1.f/(1.f+32.f*depth*x->envelope);
         gain=1.f+(gain-1.f)*x->duck_mix;
         l[i]*=gain;r[i]*=gain;

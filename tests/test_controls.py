@@ -279,4 +279,17 @@ if LOOPER_BUILD:
  for v in (0,1,2):
   knob(u,0x1bb,v);call(u,S['dly_knob_fraction'],W);fr.append(struct.unpack('<f',struct.pack('<I',u.reg_read(UC_ARM_REG_S0)))[0])
  check(fr==[0.,.5,1.],'Stretch needle spans the full scale %s'%fr)
+ # Echo Type knob (0x1bd): the native list type shows the names, slow travel like Stretch.
+ names=[]
+ for v in (0,1,2,3):
+  knob(u,0x1bd,v);w32(u,TICK,700000+v);call(u,S['dly_turn'],W,0);names.append(text(u,W))
+ print('INFO Type knob labels',names)
+ check(names==['Warp','Tape','Duck','Delay'],'Echo Type knob shows Warp, Tape, Duck (Ducked), Delay (5-character knob text) %s'%names)
+ knob(u,0x1bd,0);changes.clear()
+ for i in range(255):w32(u,TICK,800000+i*1000);call(u,S['dly_turn'],W,1)
+ check(u32(u,W+0x98)==0 and not changes,'Type: 255 slow units do not step yet (no accidental change)')
+ w32(u,TICK,1100000);call(u,S['dly_turn'],W,1)
+ check(u32(u,W+0x98)==1 and len(changes)==1 and text(u,W)=='Tape','Type: 256 slow units step once, to Tape')
+ for i in range(20):w32(u,TICK,1200000+i*1000);call(u,S['dly_turn'],W,100)
+ print('INFO Type after fast turn',u32(u,W+0x98),text(u,W));check(u32(u,W+0x98)==3 and text(u,W)=='Delay','Type stops at Delay')
 print(str(H.checks)+' total v1.0.0-alpha.4 control checks passed; physical buttons/touch and display remain device tests.')

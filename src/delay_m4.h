@@ -5,14 +5,16 @@
 #define G_DENSITY_MAX 2     /* Looper Bars: 1..2 */
 #define G_TITLE "Looper"
 #define LP_STATE ((const volatile struct phrase_looper *)0x38800ea0u)
-#define LP_ONLY(id) ((id)==LP_STOP || (id)==LP_STRETCH || (id)==LP_ECHO) /* looper-only controls, hidden in other modes */
-#define LP_SLOW(id) ((id)==LP_STRETCH) /* 0..2 selector: slow notched travel like Bars */
+#define LP_ONLY(id) ((id)==LP_STOP || (id)==LP_STRETCH || (id)==LP_ECHO || (id)==LP_ETYPE) /* looper-only controls, hidden in other modes */
+#define LP_SLOW(id) ((id)==LP_STRETCH || (id)==LP_ETYPE) /* selectors: slow notched travel like Bars */
+#define LP_SLOW_MAX(id) ((id)==LP_STRETCH?2:3) /* Stretch 0..2, Type 0..3 */
 static uint32_t lp_title(char *t);
 #else
 #define G_DENSITY_MAX 4
 #define G_TITLE "Granulr"
 #define LP_ONLY(id) 0
 #define LP_SLOW(id) 0
+#define LP_SLOW_MAX(id) 2
 #endif
 typedef void (*vfn_rect)(void *,int *);
 typedef void (*populate_fn)(uint8_t *,short *);
@@ -59,12 +61,13 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
          * list entries (0..3 or 4..7); a button in a group is not on them.
          * Group 1: Bars, Level, Stretch, and Sync, drawn at the right edge.
          * Group 2, the stock delay on the loop: Time (division with Beat Sync
-         * on), Feedback, Echo, Ping. Then REC (OVDUB) and CLEAR on the left.
+         * on), Feedback, Echo, Type (Warp/Tape/Ducked/Delay). Then REC (OVDUB)
+         * and CLEAR on the left, Ping top right (above Sync).
          * No Dub knob (overdub is at full level) and no on-screen STOP: the
          * transport stops the loop. */
         uint16_t ids[]={G_DENSITY,G_POS,LP_STRETCH,G_FREEZE,
-                        fw_get((uint8_t *)app+0xe48,0x35)?0x34:0x33,0x39,LP_ECHO,0x36,
-                        LP_REC,LP_CLEAR};
+                        fw_get((uint8_t *)app+0xe48,0x35)?0x34:0x33,0x39,LP_ECHO,LP_ETYPE,
+                        LP_REC,LP_CLEAR,0x36};
 #else
         static const uint16_t ids[]={G_POS,G_SIZE,G_DENSITY,0x4a,G_JITTER,0x39,0x3d,G_FREEZE,G_REVERSE};
 #endif
@@ -117,7 +120,7 @@ static void place(uint8_t *p,int slot) {
                 x=x0+(i<6?0:240);y=y0+45-44*(i&1);
             } else if(mode==4 && i==5){x=x0;y=y0+45;}
 #ifdef PHRASE_LOOPER
-            /* Looper: Sync at the bottom right, REC and CLEAR on the left. */
+            /* Looper: Sync bottom right; REC, CLEAR left and Ping top right (8..10). */
             else if(gran && i==3)x=x0+240;
             else if(i>=8 && i<12) {
 #else
@@ -307,7 +310,7 @@ unsigned dly_turn(uint8_t *w,int delta) {
         struct fx_ui *u=ui_state();int old=*(int *)(w+0x98);
         int density=id==G_DENSITY || LP_SLOW(id);
         int lo=logf?(id==SG_RATE?10:id==SG_HICUT || id==T_HICUT?500:20):density?(LP_SLOW(id)?0:1):-12;
-        int hi=logf?(id==SG_HICUT || id==T_HICUT?16000:2000):density?(LP_SLOW(id)?2:G_DENSITY_MAX):12;
+        int hi=logf?(id==SG_HICUT || id==T_HICUT?16000:2000):density?(LP_SLOW(id)?LP_SLOW_MAX(id):G_DENSITY_MAX):12;
         int scale=1;
         int denominator=logf?LOG_UNITS:density?256:160;
         int32_t *fraction=logf?&u->log_fraction:density?&u->density_fraction:&u->pitch_fraction;

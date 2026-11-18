@@ -29,6 +29,7 @@ void pl_render_o2(struct phrase_looper *p,struct granular *g,uint32_t bpm_x100,u
 _Static_assert(sizeof(struct phrase_looper)==64,"looper state fills 0xea0..0xedf");
 _Static_assert(__builtin_offsetof(struct phrase_looper,last)==32,"M4-visible looper fields fill the first cache line");
 _Static_assert(sizeof(struct pl_tempo)==32,"tempo line is one cache line");
+_Static_assert(0x38800ea0u+__builtin_offsetof(struct phrase_looper,etype)==0x38800eddu,"x_kind reads etype at 0x38800edd");
 static void pl_tempo_read(uint32_t *bpm_x100,uint32_t *playing) {
     /* The M4 has no D-cache and writes this line directly to SRAM; drop any
      * stale copy in the M7 D-cache first. The M7 never writes this line. */
@@ -181,7 +182,7 @@ static void dly_prepare(struct dly_shared *d, unsigned n)
     /* drift (id "flutter"): a slow 0.6 Hz wobble plus a slower random wander; extra delay 0 .. 2A, A up to 8 ms
      * (about +-2.5 % pitch at full) */
     float depth = rv_clamp((float)d->flutter * 1e-3f, 0.f, 1.f);
-    if(XS->magic==X_MAGIC && XS->mode==3)depth=0.f;
+    if(XS->magic==X_MAGIC && x_kind(XS)==3)depth=0.f;
     float fa = depth * 0.008f * D_FS;
     d->fl_ph += 0.6f * (float)n / D_FS;
     if (d->fl_ph >= 1.f) d->fl_ph -= 1.f;
@@ -192,7 +193,7 @@ static void dly_prepare(struct dly_shared *d, unsigned n)
     d->m1 = fa > 0.f ? fa * (1.f + 0.6f * s + 0.4f * d->fl_noise) : 0.f;
     if (d->m0 <= 0.f && d->m1 > 0.f) d->m0 = d->m1;                   /* drift just turned on: no jump from 0 */
 
-    int st = d->pitch_on && XS->mode!=2 ? d->pitch : 0;
+    int st = d->pitch_on && x_kind(XS)!=2 ? d->pitch : 0;
     if (st < -12) st = -12;
     if (st > 12) st = 12;
     d->p_ratio = rv_exp2((float)st * (1.f / 12.f));
@@ -219,7 +220,7 @@ void dly_read(uint32_t *line, void *bus, int ch)
     struct dly_shared *d = DS;
     if (d->magic != DS_MAGIC || !d->obj)
         return;
-    if(XS->magic==X_MAGIC && XS->mode==5)return;
+    if(XS->magic==X_MAGIC && x_kind(XS)==5)return;
     const float *buf = (const float *)line[0];
     int32_t li = (int32_t)((uint8_t *)line - (d->obj + 0x30));
     if (!size || !buf || li < 0 || li > 5 * 0x1c || li % 0x1c)
@@ -378,7 +379,12 @@ unsigned dly_process(uint8_t *obj, void *ctx)
         ((void (*)(void *,void *))0x0804e1e9u)((uint8_t *)ctx+0x1529c,msg);
         GS->mode=0;XS->mode=0;
     }
+#ifdef PHRASE_LOOPER
+    /* In the looper, ducking belongs to the echoes only (see Echo below). */
+    int gated=XS->mode==3 || XS->mode==4 || (XS->duck_mix>0.f && XS->mode!=1) || XS->rev_mix>0.f;
+#else
     int gated=XS->mode==3 || XS->mode==4 || XS->duck_mix>0.f || XS->rev_mix>0.f;
+#endif
     XS->capture_n=gated?n:0;XS->capture_l=input[0];XS->capture_r=input[1];
     if(gated)for(unsigned i=0;i<n;i++)input[0][i]=input[1][i]=0.f;
     x_prepare(XS,n);
@@ -414,7 +420,7 @@ unsigned dly_process(uint8_t *obj, void *ctx)
 #endif
     int skip=full && !echo;
     if(skip)dly_body_events(obj,ctx,ib);
-    else if(XS->mode==2) {
+    else if(x_kind(XS)==2) {
         /* exp.8: Tape hides FILT/Cutoff and bypasses the native filter (its
          * enable flag at +0x270) without rewriting the saved setting. A FILT
          * event in this block is applied by the body and kept as it set it. */
@@ -441,8 +447,10 @@ unsigned dly_process(uint8_t *obj, void *ctx)
             if(a>pk)pk=a;
             if(b>pk)pk=b;
             if(!(pk<=1e9f))pk=1e9f;
-            l[i]+=loop[0][i];r[i]+=loop[1][i];
         }
+        /* Ducked: the echoes duck under the loop. */
+        x_duck(XS,loop[0],loop[1],l,r,n);
+        for(unsigned i=0;i<n;i++){l[i]+=loop[0][i];r[i]+=loop[1][i];}
         lx->echo_pk=pk;
     } else
 #endif
@@ -466,7 +474,11 @@ unsigned dly_process(uint8_t *obj, void *ctx)
         }
     }
 
+#ifdef PHRASE_LOOPER
+    if(n && XS->mode!=1 && (XS->mode==3 || XS->duck_mix>0.f || XS->mode==4 || XS->rev_mix>0.f)) {
+#else
     if(n && (XS->mode==3 || XS->duck_mix>0.f || XS->mode==4 || XS->rev_mix>0.f)) {
+#endif
         float *l,*r;fw_stereo(bus,&l,&r);
         if(gran)x_reverse_o2(XS,GS,l,r,n,wr0,valid0);
         x_duck(XS,input[0],input[1],l,r,n);

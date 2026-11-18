@@ -32,6 +32,9 @@ void sat_defs(void *table,unsigned id,unsigned type,const char *label,int min,in
     STOCK_DEF(table,0x1ba,4,"Stop:",0,1,"lpstop");         /* button, empty stock slot */
     STOCK_DEF(table,0x1bb,1,"Stretch:",0,2,"lpstretch");   /* Off/Vari/Keep, empty stock slot */
     STOCK_DEF(table,0x1bc,8,"Echo:",0,1000,"lpecho");      /* loop into the stock delay, empty stock slot */
+    static const char *const echo_types[]={"Warp","Tape","Duck","Delay"};   /* empty stock slot */
+    ((void (*)(void *,unsigned,const char *,const char *const *,unsigned,const char *))0x08134c39u)
+        (table,0x1bd,"Type:",echo_types,4,"lpetype");
 #else
     static const char *const modes[]={"Warp delay","Granular","Tape","Ducked","Reverse","Delay"};
     ((void (*)(void *,unsigned,const char *,const char *const *,unsigned,const char *))0x08134c39u)
@@ -92,7 +95,7 @@ void dly_defaults(void *set) {
 #endif
         {T_DRIVE,350},{T_DUCK,700},{T_RELEASE,300},{T_SEGMENT,400},{T_TONE,650},{T_HICUT,6000},{T_WILD,0},{T_LOCUT,20}
 #ifdef PHRASE_LOOPER
-        ,{0x1ba,0},{0x1bb,0},{0x1bc,0} /* Looper Stop button, Stretch Off, Echo off */
+        ,{0x1ba,0},{0x1bb,0},{0x1bc,0},{0x1bd,0} /* Looper Stop button, Stretch Off, Echo off, echo type Warp */
 #endif
     };
     for(unsigned i=0;i<sizeof(defaults)/sizeof(defaults[0]);i++)

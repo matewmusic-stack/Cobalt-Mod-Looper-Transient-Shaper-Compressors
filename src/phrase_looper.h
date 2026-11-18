@@ -38,6 +38,7 @@
 #define LP_CLEAR G_SIZE
 #define LP_STRETCH 0x1bb          /* experiment: 0 off, 1 varispeed, 2 keep pitch */
 #define LP_ECHO 0x1bc             /* loop into the stock delay: 0 off .. 1000 */
+#define LP_ETYPE 0x1bd            /* echo type: 0 Warp, 1 Tape, 2 Ducked, 3 Delay */
 #define PL_MAGIC 0x504c4f32u
 #define PL_TEMPO_MAGIC 0x504c5431u
 #define PL_FS 48000u
@@ -79,7 +80,8 @@ struct phrase_looper {
     float gain,level,dub;         /* smoothed */
     uint32_t bpm_x100;            /* tempo of the current loop, hundredths of a BPM */
     uint32_t free_kb;             /* arena free before the FX1 buffer (KiB), for TOOLS */
-    uint16_t stretch;             /* 0 off, 1 varispeed, 2 keep pitch */
+    uint8_t stretch;              /* 0 off, 1 varispeed, 2 keep pitch */
+    uint8_t etype;                /* echo type (LP_ETYPE); read by delay_types.h x_kind */
     uint16_t echo;                /* Echo knob: loop level into the stock delay, 0..1000 */
 };
 
@@ -176,7 +178,8 @@ static inline void pl_drop(struct phrase_looper *p) {
 
 /* Called for every FX1 parameter event, in queue order. */
 static inline void pl_event(struct phrase_looper *p,unsigned id,int value) {
-    if(id==LP_STRETCH){p->stretch=(uint16_t)g_clampi(value,0,2);return;}
+    if(id==LP_STRETCH){p->stretch=(uint8_t)g_clampi(value,0,2);return;}
+    if(id==LP_ETYPE){p->etype=(uint8_t)g_clampi(value,0,3);return;}
     if(id==LP_ECHO){p->echo=(uint16_t)g_clampi(value,0,1000);return;}
     int k=id==LP_REC?0:id==LP_STOP?1:id==LP_CLEAR?2:-1;
     if(k<0)return;
