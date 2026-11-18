@@ -1090,6 +1090,29 @@ static void lp_boot(void) {backup_enable();PWR_CR1|=1u<<8;LP_TEMPO->muted=0;}
 #define LP_HELD 0x40000000u
 #define LP_UI_PANEL (*(uint8_t *volatile *)0x38800b04u)   /* fx_ui.panel: the FX page */
 #define LP_UI_TICKED (*(volatile uint32_t *)0x38800b94u)  /* fx_ui.ticked: the looper page is showing */
+/* Header: the tempo the looper detects, right of the bar count ("13:1 128.0").
+ * Replaces the header's snprintf(buf,16,"%d:%d",bar,beat) call (0x08139810);
+ * the next header label is placed after this text's measured width. The
+ * tempo is the one measured from the song position (Phrase Looper selected
+ * in FX1), else the incoming MIDI clock; nothing is added without either. */
+void lp_header_bar(char *buf,unsigned n,const char *fmt,int bar,int beat) {
+    ((int (*)(char *,unsigned,const char *,...))0x08143777u)(buf,n,fmt,bar,beat);
+    backup_enable();
+    uint32_t x=0;
+    uint8_t *fx1=sc_table(0x14u);
+    if(*(void *const *)(fx1+4) && fw_get(fx1,0x1a0u)==1 && LP_PL->magic==PL_MAGIC)x=LP_PL->song_x100;
+    if(!x && LP_TEMPO->magic==PL_TEMPO_MAGIC)x=LP_TEMPO->clock_x100;
+    unsigned t=(x+5u)/10u;                      /* tenths of a BPM */
+    if(t<200u || t>3000u)return;
+    unsigned k=0;while(k<n && buf[k])k++;
+    char s[8];unsigned j=0;
+    s[j++]=' ';
+    if(t>=1000u)s[j++]=(char)('0'+t/1000u);
+    s[j++]=(char)('0'+t/100u%10u);s[j++]=(char)('0'+t/10u%10u);s[j++]='.';s[j++]=(char)('0'+t%10u);
+    if(k+j+1u>n)return;
+    for(unsigned i=0;i<j;i++)buf[k+i]=s[i];
+    buf[k+j]=0;
+}
 void lp_main(int loading) {
     backup_enable();PWR_CR1|=1u<<8;
     volatile struct pl_tempo *t=LP_TEMPO;

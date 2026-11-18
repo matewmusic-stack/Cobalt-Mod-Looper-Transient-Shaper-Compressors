@@ -227,6 +227,23 @@ s0=get(u,0x14,SYNC);put(u,0x14,SYNC,1-s0)
 check(lp_main(u)==[] and get(u,0x14,SYNC)==1-s0,'no loop: Sync can be changed');put(u,0x14,SYNC,s0);lp_main(u)
 w32(u,0x38800b04,0)
 o=run(u,10);check(all(x==0. for x in o),'cleared looper is silent')
+# Header: detected tempo right of the bar count, through the patched
+# snprintf call site (0x08139810) and the real stock formatter.
+site=[p for p in M['patches'] if p['address']==0x08139810]
+check(len(site)==1,'header bar-count format call is patched to lp_header_bar')
+HB=0x24050200
+def header(bar,beat):
+ u.mem_write(HB,bytes(16));u.mem_write(0x2407f000,struct.pack('<I',beat))   # 5th argument: [sp] at entry (call() sets sp=0x2407f000)
+ call(u,PC['lp_header_bar'],HB,16,0x8146998,bar)
+ return bytes(u.mem_read(HB,16)).split(b'\0')[0].decode()
+w32(u,PL+36,12802);clk=u32(u,TEMPO+28)
+hd=[header(13,1)]
+w32(u,PL+36,0);w32(u,TEMPO+28,12550);hd.append(header(13,1))
+w32(u,TEMPO+28,0);hd.append(header(13,1))
+w32(u,PL+36,9950);hd.append(header(999,4))
+w32(u,PL+36,0);w32(u,TEMPO+28,clk)
+print('INFO header texts',hd)
+check(hd==['13:1 128.0','13:1 125.5','13:1','999:4 99.5'],'header shows the detected tempo right of the bar count: looper measurement, else MIDI clock, else nothing (%s)'%hd)
 t=[]
 for v in (12802,9950,0):w32(u,PL+36,v);t.append(title(u))
 check(t==['Lp128.0','Lp99.5','Looper'],'empty with a measured song tempo: title shows it (%s)'%t)

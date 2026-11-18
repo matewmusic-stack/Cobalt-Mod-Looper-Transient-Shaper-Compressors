@@ -207,6 +207,8 @@ add('Scenes edit page edits',0x08125e04,branch(0x08125e04,0x08124b44),branch(0x0
 add('Tools MIDI row has no value',0x0814ba3c,struct.pack('<I',0x08131211),struct.pack('<I',PC['pc_tools_event']|1))
 add('Row list tap on the MIDI row opens the MIDI page',0x0814cac4,struct.pack('<I',0x0813d89d),struct.pack('<I',PC['pc_list_event']|1))
 add('Scenes project reader',0x08121416,branch(0x08121416,0x081079c0),branch(0x08121416,PC['sc_read']))
+if os.environ.get('LOOPER')=='1':
+ add('Looper: detected tempo right of the bar count',0x08139810,branch(0x08139810,0x08143776),branch(0x08139810,PC['lp_header_bar']))
 manifest=dict(name='Cobalt for 1010music bluebox desktop',version='1.2.0',firmware='desktop 1.5.2',size=len(stock),stock_sha256=STOCK_HASH,patched_sha256=hashlib.sha256(patched).hexdigest(),patches=patches,symbols={str(c):symbols(c) for c in [7,4]})
 # LOOPER=1 (see build.sh): the Phrase Looper variant. It goes through the same
 # theme and manifest steps, then writes its own patchers (see the end); the
