@@ -59,15 +59,16 @@ unsigned dly_parameters(void *app,short *slot,void *list) {
 #ifdef PHRASE_LOOPER
         /* Phrase Looper. The encoders turn the knobs of one group of four
          * list entries (0..3 or 4..7); a button in a group is not on them.
-         * Group 1: Bars, Level, Stretch, and Sync, drawn at the right edge.
-         * Group 2, the stock delay on the loop: Time (division with Beat Sync
-         * on), Feedback, Echo, Type (Warp/Tape/Ducked/Delay). Then REC (OVDUB)
-         * and CLEAR on the left, Ping top right (above Sync).
+         * Group 1: Bars, Level, Stretch, and the looper's Sync (bottom row,
+         * second column). Group 2, the stock delay on the loop: Time (division
+         * with Beat on), Feedback, Echo, Type (Warp/Tape/Ducked/Delay). Then
+         * REC (OVDUB) and CLEAR on the left, Ping top right and the delay's
+         * Beat (0x35, its tempo sync, separate from the looper's) below it.
          * No Dub knob (overdub is at full level) and no on-screen STOP: the
          * transport stops the loop. */
         uint16_t ids[]={G_DENSITY,G_POS,LP_STRETCH,G_FREEZE,
                         fw_get((uint8_t *)app+0xe48,0x35)?0x34:0x33,0x39,LP_ECHO,LP_ETYPE,
-                        LP_REC,LP_CLEAR,0x36};
+                        LP_REC,LP_CLEAR,0x36,0x35};
 #else
         static const uint16_t ids[]={G_POS,G_SIZE,G_DENSITY,0x4a,G_JITTER,0x39,0x3d,G_FREEZE,G_REVERSE};
 #endif
@@ -108,7 +109,9 @@ static void move(uint8_t *w,int x,int y,int h) {
 static void place(uint8_t *p,int slot) {
     if(p[P_COMPACT_OFF] || (uint16_t)(slot-0x14)>=2)return;
     int mode=slot==0x14?fx_mode((void *)0x300173d0u):-1;
+#ifndef PHRASE_LOOPER
     int gran=mode==1;
+#endif
     int x0=*(int *)(p+4),y0=*(int *)(p+8);
     for(int w=0;w<13;w++) {
         /* Tape has no FILT since exp.8: its later widgets use FILT's old
@@ -120,8 +123,7 @@ static void place(uint8_t *p,int slot) {
                 x=x0+(i<6?0:240);y=y0+45-44*(i&1);
             } else if(mode==4 && i==5){x=x0;y=y0+45;}
 #ifdef PHRASE_LOOPER
-            /* Looper: Sync bottom right; REC, CLEAR left and Ping top right (8..10). */
-            else if(gran && i==3)x=x0+240;
+            /* Looper: REC, CLEAR left; Ping and Beat right (8..11). */
             else if(i>=8 && i<12) {
 #else
             else if(gran && (i==7||i==8)){x=x0;y=y0+45-44*(i-7);}
@@ -523,8 +525,10 @@ float dly_knob_fraction(uint8_t *w) {
 /* Tools header has three pre-existing fields: storage at +174, empty
  * middle at +d4, official version at +34. Reuse the empty field. */
 #ifdef PHRASE_LOOPER
-/* Looper build: the middle TOOLS field shows the longest loop and the SDRAM
- * that was free for it at boot, e.g. "Cblt L4.0s F3.1M". */
+/* Looper build: the middle TOOLS field shows the longest loop (whole seconds)
+ * and the SDRAM that was free for it at boot, e.g. "4s 1.0M". The field holds
+ * about 8 characters of the 12 px header font; longer text spills over the
+ * storage field on the left and is cut by the version on the right. */
 static char *lp_num(char *q,uint32_t tenths) {
     if(tenths>999u)tenths=999u;
     if(tenths>=100u)*q++=(char)('0'+tenths/100u);
@@ -538,9 +542,9 @@ void dly_tools_version(void *label,const char *stock) {
     backup_enable();
     const volatile struct phrase_looper *s=LP_STATE;
     if(s->magic==PL_MAGIC) {
-        char t[24],*q=t;const char *w="Cblt L";
-        while(*w)*q++=*w++;
-        q=lp_num(q,s->cap/4800u);*q++='s';*q++=' ';*q++='F';
+        char t[12],*q=t;
+        uint32_t sec=(s->cap+24000u)/48000u;if(sec>9u)sec=9u;
+        *q++=(char)('0'+sec);*q++='s';*q++=' ';
         q=lp_num(q,s->free_kb*10u/1024u);*q++='M';*q=0;
         ((void (*)(void *,const char *))0x0813820du)((uint8_t *)label+0xa0,t);
         return;

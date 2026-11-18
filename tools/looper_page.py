@@ -13,17 +13,18 @@ GUIDE = '''<section id="looper"><h2>Using the Phrase Looper</h2>
 <tr><th>REC / OVDUB</th><td>Empty: record (on the next bar line while the sequencer plays). At the end of the bars the loop plays by itself. Recording: end on the next bar line. Once a loop exists the button reads OVDUB: overdub on / off.</td></tr>
 <tr><th>Transport</th><td>The bluebox (or master clock) Stop stops the loop; Play plays it again in step with the song. There is no on-screen STOP.</td></tr>
 <tr><th>CLEAR</th><td>Empty the loop.</td></tr>
-<tr><th>Sync</th><td>On: with the sequencer stopped, REC waits and recording starts when you press start. Locked while a loop exists.</td></tr>
+<tr><th>Sync</th><td>The looper's sync, bottom row of the first knob group. On: with the sequencer stopped, REC waits and recording starts when you press start. Locked while a loop exists.</td></tr>
 <tr><th>Bars</th><td>1 or 2 bars at the tempo measured from the song position (before the sequencer has run: MIDI clock or project BPM).</td></tr>
 <tr><th>Level</th><td>Loop volume. The FX1 return carries only the loop.</td></tr>
 <tr><th>Stretch</th><td>What the loop does when the tempo changes after recording. <b>Off</b>: keeps its recorded speed and restarts on every loop cycle. <b>Vari</b>: plays faster or slower to stay in time, and the pitch moves with it, like tape (&plusmn;8 BPM at 120 is about &plusmn;1 semitone). <b>Keep</b>: stays in time at the same pitch, with slight graininess on sustained notes.</td></tr>
-<tr><th>Time / Feedb</th><td>The stock delay, played on the loop: Time (a note division with Beat Sync on) and feedback. Other delay settings come from the Delay page.</td></tr>
-<tr><th>Echo</th><td>How much of the loop goes into the delay; 0 = off. The FX1 return carries the loop plus its echoes.</td></tr>
+<tr><th>Time / Feedb</th><td>The stock delay, played on the loop: Time (a note division with Beat on) and feedback. Other delay settings come from the Delay page.</td></tr>
+<tr><th>Echo</th><td>How much of the loop and the live FX1 sends goes into the delay; 0 = off. The FX1 return carries the loop plus the echoes (live tracks are heard dry on the mixer). Works with no loop too.</td></tr>
 <tr><th>Type</th><td>The echoes' delay type: Warp, Tape, Duck (Ducked) or Delay. Only the chosen type runs, on the echoes only; its settings come from that type's page.</td></tr>
 <tr><th>Ping</th><td>Button, top right: echoes alternate left and right.</td></tr>
+<tr><th>Beat</th><td>Button, bottom right: the delay's tempo sync, separate from the looper's Sync. On: Time is a note division; off: milliseconds.</td></tr>
 </table>
 <p class="muted">REC and CLEAR act once per press and never stay lit. While the loop plays, the tracks feeding FX1 are muted automatically, so you hear only the loop. They are unmuted while you record or overdub, and when you stop, clear or leave the looper. Tracks you muted yourself are never touched.</p>
-<p class="muted">Loops are stored as 16-bit audio. The TOOLS page shows the longest loop, for example <code>Cblt L4.0s</code>: 4 seconds is 2 bars at 120 BPM or faster. When 2 bars don’t fit, the loop is 1 bar and the title shows REC 1/1. Switching FX1 to another mode empties the loop.</p>
+<p class="muted">Loops are stored as 16-bit audio. The TOOLS page shows the longest loop, for example <code>4s 1.0M</code>: a 4-second loop is 2 bars at 120 BPM or faster. When 2 bars don’t fit, the loop is 1 bar and the title shows REC 1/1. Switching FX1 to another mode empties the loop.</p>
 </section>
 '''
 
@@ -47,7 +48,7 @@ def adapt(page, manifest):
         ('Restore the original from a Cobalt ' + v + ' firmware file',
          'Restore the original from a Cobalt ' + v + ' + Phrase Looper firmware file'),
         ('Generate a new BLUEBOX.BIN and install it with your usual SD-card procedure.',
-         'Generate a new BLUEBOX.BIN. Copy it to the root of the microSD card, hold <b>A</b> while powering the bluebox on, and let go when “Bluebox Installer” appears. TOOLS then shows <code>Cblt L…</code>.'),
+         'Generate a new BLUEBOX.BIN. Copy it to the root of the microSD card, hold <b>A</b> while powering the bluebox on, and let go when “Bluebox Installer” appears. TOOLS then shows the looper readout, e.g. <code>4s 1.0M</code>.'),
         ('Unofficial firmware · Cobalt v' + v + '.', 'Unofficial, experimental firmware · Cobalt v' + v + ' + FX1 Phrase Looper.'),
         ('<section id="guide">', GUIDE + '<section id="guide">'),
         ('<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup.</p>',

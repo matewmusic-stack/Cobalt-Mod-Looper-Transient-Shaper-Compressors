@@ -209,6 +209,10 @@ add('Row list tap on the MIDI row opens the MIDI page',0x0814cac4,struct.pack('<
 add('Scenes project reader',0x08121416,branch(0x08121416,0x081079c0),branch(0x08121416,PC['sc_read']))
 if os.environ.get('LOOPER')=='1':
  add('Looper: detected tempo right of the bar count',0x08139810,branch(0x08139810,0x08143776),branch(0x08139810,PC['lp_header_bar']))
+ # Bar-count label 100 -> 124 px (8 -> 10 characters of the 12 px font), so
+ # "105:3 132" is not cut. The label right of it (x 90) only shows text while
+ # recording to SD (e.g. "123MB"); empty labels draw no background.
+ add('Looper: bar-count label width 100 to 124 pixels',0x08139722,bytes.fromhex('6423'),bytes.fromhex('7c23'))
 manifest=dict(name='Cobalt for 1010music bluebox desktop',version='1.2.0',firmware='desktop 1.5.2',size=len(stock),stock_sha256=STOCK_HASH,patched_sha256=hashlib.sha256(patched).hexdigest(),patches=patches,symbols={str(c):symbols(c) for c in [7,4]})
 # LOOPER=1 (see build.sh): the Phrase Looper variant. It goes through the same
 # theme and manifest steps, then writes its own patchers (see the end); the

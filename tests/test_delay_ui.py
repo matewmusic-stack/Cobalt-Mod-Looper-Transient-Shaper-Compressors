@@ -46,6 +46,20 @@ for i in range(12):
  expected=(10+48*(col+1),100+45-44*(i&1),48,44)
  check(all(struct.unpack('<4i',u.mem_read(w+4,16))==expected for w in [KW(i),TW(i)]),'native compact layout plus wrapper places delay widget '+str(i))
 check(all(u32(u,TW(i)+0x3c)==0 for i in range(16)),'layout preserves button label coordinates')
+if LOOPER_BUILD:
+ # Looper page: Bars/Level, Stretch/Sync in the grid; REC/CLEAR left; Ping/Beat right.
+ heap=[0xc0020000]
+ def alloc(u):a=heap[0];heap[0]=(a+u.reg_read(UC_ARM_REG_R0)+15)&~15;u.reg_write(UC_ARM_REG_R0,a)
+ stub(u,0x8103128,alloc);call(u,0x8134cb8,0);u.mem_write(0x24009100,b'\4');call(u,0x81202b8,0x300173d0+0xe48,0x24009100)
+ call(u,0x8120264,0x300173d0+0xe48,0x1a0,1)
+ check(call(u,0x8120234,0x300173d0+0xe48,0x1a0)==1,'model set to the looper (FX1 mode 1)')
+ for i in range(12):w32(u,KW(i)+4,0);w32(u,TW(i)+4,0)
+ call(u,M['symbols']['4']['dly_layout'],P)
+ names=['Bars','Level','Stretch','Sync','Time','Feedb','Echo','Type','REC','CLEAR','Ping','Beat']
+ for i in range(12):
+  col=(-1 if i in [8,9] else 4 if i in [10,11] else i//2)
+  expected=(10+48*(col+1),100+45-44*(i&1),48,44)
+  check(all(struct.unpack('<4i',u.mem_read(w+4,16))==expected for w in [KW(i),TW(i)]),'looper page: %s at column %d, %s row'%(names[i],col+1,'top' if i&1==0 else 'bottom'))
 # populate wrapper moves before the native populate boundary and avoids repeats.
 seen=[]
 stub(u,0x812abe0,lambda u:seen.append(list(moves)))

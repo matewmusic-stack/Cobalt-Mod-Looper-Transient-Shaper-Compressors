@@ -241,8 +241,12 @@ hd=[header(13,1)]
 w32(u,PL+36,0);w32(u,TEMPO+28,12550);hd.append(header(13,1))
 w32(u,TEMPO+28,0);hd.append(header(13,1))
 w32(u,PL+36,9950);hd.append(header(999,4))
+w32(u,PL+36,13200);long=header(9999,4)
 w32(u,PL+36,0);w32(u,TEMPO+28,clk)
-print('INFO header texts',hd)
+print('INFO header texts',hd,long)
+wd=[p for p in M['patches'] if p['address']==0x08139722]
+check(len(wd)==1 and patched[0x08139722-0x08040000:0x08139724-0x08040000]==bytes.fromhex('7c23') and stock[0x08139722-0x08040000:0x08139724-0x08040000]==bytes.fromhex('6423'),'bar-count label widened from 100 to 124 px (movs r3,#124)')
+check(long=='9999:4 132' and 4+12*len(long)<=4+124,'longest header text fits the widened label: %r is %d px of 124'%(long,12*len(long)))
 check(hd==['13:1 128','13:1 126','13:1','999:4 100'],'header shows the detected tempo right of the bar count: looper measurement, else MIDI clock, else nothing (%s)'%hd)
 t=[]
 for v in (12802,9950,0):w32(u,PL+36,v);t.append(title(u))
@@ -330,7 +334,8 @@ u.hook_del(rh)
 texts=[];h=stub(u,0x813820c,lambda u:texts.append(bytes(u.mem_read(u.reg_read(UC_ARM_REG_R1),24)).split(b'\0')[0].decode()))
 call(u,S4['dly_tools_version'],0x24050000,0x24050200);u.hook_del(h)
 fr=pl(u)['free_kb']*10//1024
-want='Cblt L8.0s F%d.%dM'%(fr//10,fr%10)
+want='8s %d.%dM'%(fr//10,fr%10)
+check(len(want)<=8,'TOOLS readout fits its 8-character field: '+want)
 check(texts[-1]==want,'TOOLS shows the longest loop and the free SDRAM: %s'%texts[-1])
 
 # ============================================ MIDI clock tempo (M4 -> M7)

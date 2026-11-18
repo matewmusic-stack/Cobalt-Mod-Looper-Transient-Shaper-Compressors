@@ -405,10 +405,12 @@ unsigned dly_process(uint8_t *obj, void *ctx)
     int full=gran && GS->mode && XS->mode==1 && !gated && GS->fade==1.f && ib->l;
 #ifdef PHRASE_LOOPER
     /* Echo: with the looper fully in, the stock delay runs on the loop
-     * instead of being skipped: the loop is rendered first and sent into the
-     * delay at the Echo level; the return then carries loop + echoes. It
-     * keeps running after Echo goes to 0 until the echoes have died away. */
-    float loop[2][D_MAXN];
+     * instead of being skipped: the loop is rendered first and sent, with the
+     * live FX1 sends, into the delay at the Echo level; the return then
+     * carries loop + echoes (the live sends are heard dry on the mixer, so
+     * only their echoes come back here). It keeps running after Echo goes to
+     * 0 until the echoes have died away. */
+    float loop[2][D_MAXN],src[2][D_MAXN];
     struct pl_stretch *lx=full && PL->magic==PL_MAGIC && PL->owner==obj?(struct pl_stretch *)(void *)((uint8_t *)GS->buffer+PL->cap*PL_FRAME):0;
     int echo=lx && lx->magic==PLX_MAGIC && (PL->echo || lx->echo_g>0.f || lx->echo_pk>1e-5f);
     if(echo) {
@@ -420,7 +422,10 @@ unsigned dly_process(uint8_t *obj, void *ctx)
         pl_publish();
         float *l,*r;fw_stereo(bus,&l,&r);
         float e=lx->echo_g,et=(float)PL->echo*.001f,de=n?(et-e)/(float)n:0.f;
-        for(unsigned i=0;i<n;i++){e+=de;l[i]=loop[0][i]*e;r[i]=loop[1][i]*e;}
+        for(unsigned i=0;i<n;i++) {
+            src[0][i]=loop[0][i]+input[0][i];src[1][i]=loop[1][i]+input[1][i];
+            e+=de;l[i]=src[0][i]*e;r[i]=src[1][i]*e;
+        }
         lx->echo_g=et;
         ib->silent=0;ib->stereo=1;
     }
@@ -457,8 +462,8 @@ unsigned dly_process(uint8_t *obj, void *ctx)
             if(b>pk)pk=b;
             if(!(pk<=1e9f))pk=1e9f;
         }
-        /* Ducked: the echoes duck under the loop. */
-        x_duck(XS,loop[0],loop[1],l,r,n);
+        /* Ducked: the echoes duck under the loop and the live sends. */
+        x_duck(XS,src[0],src[1],l,r,n);
         for(unsigned i=0;i<n;i++){l[i]+=loop[0][i];r[i]+=loop[1][i];}
         lx->echo_pk=pk;
     } else

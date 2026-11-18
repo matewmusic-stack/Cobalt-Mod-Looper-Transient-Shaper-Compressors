@@ -118,6 +118,41 @@ L,R=r.take(NB);p=peaks(L)
 check(len(p)==1 and abs(p[0][1]-.5)<.01,'after the tail: one pass holds only the click again (%s)'%p)
 check(max(r.cost[-200:])<=off_cost+64,'after the tail: the stock delay is skipped again (worst %d)'%max(r.cost[-200:]))
 
+# ------------------------- live FX1 sends also feed the Echo (not just the loop)
+# The tracks' dry sound is on the mixer; FX1 returns only their echoes.
+def fresh(echo,etype=0):
+ u=setup();r=Run(u)
+ r.blk(INITIAL+[(MODE,1),(LEVEL,1000),(CLEAR,0),(BARS,1),(DUB,1000),(SYNC,0),(REC,0),(STOP,0),(STRETCH,0),(ECHO,echo),(ETYPE,etype),
+                (BEAT,0),(TIME,10),(FEEDB,500),(PING,0)])
+ steady(u);r.run(10);return u,r
+u,r=fresh(1000)
+check(pl(u)['state']!=PLAYING and pl(u)['len']==0,'no loop recorded')
+r.run(100);r.blk(click=True);r.run(4*D//32+40)
+L,R=r.take(4*D//32+41);p=peaks(L)
+print('INFO live send, no loop, Echo 100%: left peaks',p[:5])
+check(len(p)>=3 and abs(p[0][0]-D)<=1 and abs(p[0][1]-.5)<.01 and abs(p[1][0]-2*D)<=1 and abs(p[1][1]-.25)<.01 and abs(p[2][1]-.125)<.01,
+      'live send with no loop, Echo 100%%: no dry click on the return, echoes at +%d (0.5), +%d (0.25), +%d (0.125)'%(D,2*D,3*D))
+check(peaks(R)==p,'live send: right channel matches left')
+check(pl(u)['len']==0,'live send did not record anything into the loop')
+u,r=fresh(0)
+r.run(100);r.blk(click=True);r.run(4*D//32+40)
+L,R=r.take(4*D//32+41)
+check(max(abs(x) for x in L+R)<1e-6,'live send with Echo 0: FX1 returns silence, as before')
+u,r=fresh(500)
+r.run(100);r.blk(click=True);r.run(2*D//32+40)
+L,R=r.take(2*D//32+41);p=peaks(L)
+check(p and abs(p[0][0]-D)<=1 and abs(p[0][1]-.25)<.01,'live send, Echo 50%%: first echo at half level (%s)'%p[:2])
+# With a loop playing: the loop click and its echoes, plus a live click's echoes.
+u,r=looper()
+r.blk([(ECHO,1000)]);r.run(NB)
+r.run(NB//4);r.blk(click=True);k0=r.k-1
+r.run(2*D//32+40)
+L,R=r.take(r.k-k0);p=peaks(L)
+live=[x for x in p if abs(x[0]-D)<=1 or abs(x[0]-2*D)<=1]
+print('INFO loop + live send: peaks from the live click',p[:8])
+check(len(live)==2 and abs(live[0][1]-.5)<.01 and abs(live[1][1]-.25)<.01,'loop playing + live send: the live click\'s echoes at +%d and +%d ride along with the loop\'s (%s)'%(D,2*D,live))
+check(not [x for x in p if x[0]<=1],'loop playing + live send: still no dry live click on the return')
+
 # -------------------------------------------------- Ping: echoes alternate L/R
 u,r=looper(ping=1)
 r.run(NB);r.blk([(ECHO,1000)]);r.run(2*NB)
