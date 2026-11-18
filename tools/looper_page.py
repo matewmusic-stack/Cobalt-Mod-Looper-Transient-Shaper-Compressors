@@ -7,7 +7,7 @@ cannot silently drop one.
 """
 
 GUIDE = '''<section id="looper"><h2>Using the Phrase Looper</h2>
-<p class="muted">Turn up the FX1 send on the track(s) you want to loop, open FX1 and choose <b>Phrase Looper</b> (where Granular was). The FX1 title shows the state: Looper, ARMED, REC 1/2, PLAY, DUB or STOP. Empty, it shows the tempo the looper measured, e.g. Lp128.0.</p>
+<p class="muted">Turn up the FX1 send on the track(s) you want to loop, open FX1 and choose <b>Phrase Looper</b> (where Granular was). The FX1 title shows the state: Looper, ARMED, REC 1/2, PLAY, DUB or STOP. Empty, it shows the tempo the looper measured, e.g. Lp128.0. The header also shows the detected tempo right of the bar count, in every FX1 mode.</p>
 <p class="muted">With the sequencer playing, REC waits for the next bar line and records exactly the set bars; the loop stays locked to the song position. The tempo is measured from the song position, so an external master clock (such as a Blackbox) is followed without setting the bluebox BPM.</p>
 <table class="looper-table">
 <tr><th>REC / OVDUB</th><td>Empty: record (on the next bar line while the sequencer plays). At the end of the bars the loop plays by itself. Recording: end on the next bar line. Once a loop exists the button reads OVDUB: overdub on / off.</td></tr>

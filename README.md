@@ -19,6 +19,7 @@ This repository is the [Cobalt](https://github.com/sbsmnt/bluebox-cobalt-mod) fi
 - **REC / OVDUB** and **CLEAR** buttons, **Sync** (locked while a loop exists), **Bars**, **Level** and **Stretch** (Off / Vari / Keep).
 - **Echo:** Time, Feedb, Echo and **Type** knobs plus a **Ping** button run the stock FX1 delay on the loop, in time with the song, as one delay type at a time: Warp, Tape, Duck(ed) or Delay.
 - **Auto-mute** of the tracks feeding FX1 while the loop plays.
+- **Detected tempo in the header,** right of the bar count, in every FX1 mode (measured from the song position, so it shows an external master's tempo).
 
 # Part 1 - Added in this repository: Phrase Looper + Echo
 
@@ -26,13 +27,13 @@ This repository is the [Cobalt](https://github.com/sbsmnt/bluebox-cobalt-mod) fi
 
 ## Install
 
-**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)** publishes the current build (default theme SHA-256 `f4fab10b…`): locked to the song position, bar-quantized REC, Stretch, tempo measured from the song position (so it follows an external master clock), the loop following the transport, and Echo, the stock FX1 delay played on the loop with a choice of delay type. This build has been tried on hardware. Drop in the original desktop 1.5.2 `BLUEBOX.BIN`; everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN`. **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included. `LOOPER=1 ./build.sh` does not touch the live page; `LOOPER=1 PUBLISH=1 ./build.sh` replaces `docs/looper/index.html` when a build is ready.
+**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)** publishes the current build (default theme SHA-256 `e7dd3237…`): locked to the song position, bar-quantized REC, Stretch, tempo measured from the song position (so it follows an external master clock), the loop following the transport, and Echo, the stock FX1 delay played on the loop with a choice of delay type. This build has been tried on hardware. Drop in the original desktop 1.5.2 `BLUEBOX.BIN`; everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN`. **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included. `LOOPER=1 ./build.sh` does not touch the live page; `LOOPER=1 PUBLISH=1 ./build.sh` replaces `docs/looper/index.html` when a build is ready.
 
 Install the new `BLUEBOX.BIN` as any bluebox firmware: copy it to the root of the microSD card, hold **A** while powering on, and let go when "Bluebox Installer" appears. TOOLS then shows `Cblt L…`.
 
 ## Using the looper
 
-Turn up the FX1 send on the tracks to loop and select **Phrase Looper** in the FX1 mode list (where Granular was). The FX1 title shows the state: `Looper` (empty), `ARMED`, `REC 1/2`, `PLAY`, `DUB` or `STOP`. Once the looper has measured a tempo, the empty title shows it instead, for example `Lp128.0`.
+Turn up the FX1 send on the tracks to loop and select **Phrase Looper** in the FX1 mode list (where Granular was). The header shows the detected tempo right of the bar count, for example `12:2 126`, whatever FX1 is set to. The FX1 title shows the state: `Looper` (empty), `ARMED`, `REC 1/2`, `PLAY`, `DUB` or `STOP`. Once the looper has measured a tempo, the empty title shows it instead, for example `Lp128.0`.
 
 Page layout. The physical knobs turn the knobs of one highlighted group of four list entries; buttons are never on them.
 
@@ -77,7 +78,22 @@ On the bluebox the CPU bar stays green with Keep + Tape + Ping.
 
 ## Hardware testing (one device)
 
-All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `f4fab10b…`, `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `e7dd3237…`, `f4fab10b…` (version 12), `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+
+Current build (`e7dd3237…`), clocked by the Blackbox:
+
+| | |
+|---|---|
+| ![Empty, tempo in title and header](images/hardware/v13-1-empty-tempo.jpg) | ![REC 1/2](images/hardware/v13-2-rec-1-of-2.jpg) |
+| **Empty:** title `Lp126.0`, header `3:2 126.` (detected tempo right of the bar count). Knob group 1: Bars, Stretch (`Off`), Level; group 2: Time (`1/64`), Echo, Feedb, Type (`Warp`); Ping and Sync on the right | **REC 1/2** on the bar line, header `10:2 126` |
+| ![REC 2/2](images/hardware/v13-3-rec-2-of-2.jpg) | ![PLAY, OVDUB](images/hardware/v13-4-play-ovdub.jpg) |
+| **REC 2/2** | **PLAY:** the button now reads `OVDUB` |
+| ![Echo type Delay](images/hardware/v13-5-echo-type-delay.jpg) | ![Echo Warp, 1/8D](images/hardware/v13-6-echo-warp-dotted.jpg) |
+| **Knob group 2 selected** (the physical knobs turn Time, Echo, Feedb, Type): Time `1/8`, Type `Delay` | Time `1/8D`, Type `Warp` |
+| ![Ping on](images/hardware/v13-7-ping-on.jpg) | ![Ping on, later](images/hardware/v13-8-ping-on-later.jpg) |
+| **Ping on** (top right) | Ping on, bar 52 |
+| ![Keep at 128 BPM](images/hardware/v13-9-keep-128bpm.jpg) | |
+| **Tempo change:** the Blackbox at 128, header `64:4 128`; Stretch `Keep` | |
 
 Version 10 (`3f14345a…`), clocked by the Blackbox at 128 BPM, taking a 2-bar loop:
 
@@ -110,6 +126,7 @@ Confirmed on that unit:
 - with the Blackbox as master clock, the loop follows project changes with slightly different tempos (e.g. 126 → 128), and the looper detects the external tempo and records the next loop in sync without touching the bluebox BPM (`1438c1ad…`);
 - 2-bar takes at 128 BPM on the bar lines: ARMED, REC 1/2, REC 2/2, PLAY (photos above);
 - version 10 (`3f14345a…`) installed and tested: Echo on the loop, the new page layout and knob groups, transport stop, OVDUB and the Sync lock;
+- current build `e7dd3237…`: the detected tempo in the header (whole BPM, see above), 2-bar takes on the bar lines, OVDUB, the knob groups on the physical knobs, echo types Warp and Delay, Ping, and the loop following a tempo change to 128 with Stretch Keep (photos above);
 - the echo Type knob and the CPU: the CPU bar stays green with Stretch Keep, Tape echo and Ping (version 11), and the current build `f4fab10b…` with the smooth Vari/Keep lock;
 - known: REC or CLEAR pressed within a few seconds of a project/bank change (e.g. the Blackbox switching projects) can stay lit, because Cobalt pauses its button and mixer upkeep during loads; the next press only turns it off;
 - the free arena when FX1 is built is only about 1 MB, so the looper uses the tested 768,000-byte buffer: 4 s, which is 2 bars at 120 BPM or faster. An earlier 32-bit build fell back to 1 bar for this reason (title `REC 1/1`).
@@ -151,6 +168,8 @@ How it works: the looper uses the Granular SDRAM buffer, allocated once when FX1
 | Instructions per block, worst | 3.3k | 6.9k | 9.2k (tested Granular: 14.8k–16.8k) |
 
 At the recorded tempo both modes play the loop unchanged. While stretched, overdubbing layers input at the current read position.
+
+**Header tempo.** The header builds its bar count with `snprintf("%d:%d")` at `0x08139810`; in the looper build that call goes to `lp_header_bar`, which appends the tempo. With the Phrase Looper in FX1 it uses the looper's sample-accurate measurement; otherwise `lp_song_tempo` (M4, every pass of the UI loop) reads the same song position, stores it with the UI millisecond clock at each beat, and measures over the last 2 to 7 beats; else the MIDI clock tempo. The next header label is placed after the text's measured width, as before. The label clips the text, so on the bluebox the tempo shows as whole BPM (`126`; `126.` with a short bar count). Tested through the real UI loop with FX1 on another mode: 126.0, 128.0 and 122.4 for 122.37 BPM, kept while stopped.
 
 **Smooth lock (no crunch).** Locked to the song, Vari and Keep used to set their read position from the song phase on every sample, so it jumped with each song-position update: audible grit. The read position now runs at the song's speed and is steered once per block (a 0.1 s pull plus a learned speed correction over 0.5 s, at most ±10%; more than 50 ms off jumps). Keep also plays the loop straight while the speed is within 0.2% of the recording (hysteresis to 0.4%), and splices grains only when the tempo really differs. Emulator, chord loop, song running at the recorded tempo: Vari high-frequency grit +45.9 → +17.3 dB over the clean chord (Off, the 16-bit floor: +19.6), Keep worst-window smearing −42 → −53 dB; after a sudden 120 → 128 BPM jump the loop stays within 5 ms of the song while catching up, then within 0.5 ms. Input louder than ±2.0 (+6 dB over full scale) clips in the 16-bit loop.
 
