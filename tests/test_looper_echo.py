@@ -175,4 +175,32 @@ for k,v in worst.items():
  else:print('WARN Ping + Stretch %s + %s echo: worst block %d instructions, above the hardware-tested Granular (16829): check the CPU meter on the bluebox'%(k[0],k[1],v))
 check(all(worst[(st,et)]<16829 for st in ('Off',) for et in ('Warp','Tape','Duck')) and all(worst[(st,'Warp')]<16829 for st in ('Vari','Keep')),'Stretch Off with any echo type, and Warp echo with any Stretch: within the tested range')
 check(max(worst.values())<20000,'every combination stays under 20k instructions (worst %d)'%max(worst.values()))
+# ------------------------------- exactly one echo type at a time
+# Every type's controls turned up at once (Drift, Pitch on +12, Duck 100%,
+# Tape Drive 100%, To Rev 100%); the state of each type's processing is read back from
+# the firmware while the echo runs: only the selected type's is active.
+XSB,DSB=0x38800200,0x38800d00
+def active(u):
+ tape1=struct.unpack('<f',u.mem_read(XSB+36,4))[0];duck=struct.unpack('<f',u.mem_read(XSB+80,4))[0]
+ m1=struct.unpack('<f',u.mem_read(DSB+40,4))[0];ratio=struct.unpack('<f',u.mem_read(DSB+316,4))[0]
+ send=struct.unpack('<f',u.mem_read(DSB+52,4))[0]
+ return {'tape':tape1>0,'duck':duck>0,'drift':m1>0,'pitch':abs(ratio-1)>1e-6,'send':send>0}
+WANT={0:{'tape':False,'duck':False,'drift':True,'pitch':True,'send':True},     # Warp: drift + pitch
+      1:{'tape':True,'duck':False,'drift':True,'pitch':False,'send':True},     # Tape: tape stage (+ its Drift), no pitch
+      2:{'tape':False,'duck':True,'drift':False,'pitch':True,'send':True},     # Ducked: ducking (+ its Pitch), no drift
+      3:{'tape':False,'duck':False,'drift':False,'pitch':False,'send':False}}   # Delay: the stock delay only
+for et,name in [(0,'Warp'),(1,'Tape'),(2,'Duck'),(3,'Delay')]:
+ u,r=looper(etype=et)
+ r.blk([(0x3a,1000),(0x4b,1),(0x4a,12),(0x1a8,1000),(0x1a7,1000),(0x3d,1000),(ECHO,1000)]);r.run(400)
+ a=active(u)
+ print('INFO Type %-5s active processing: %s'%(name,a))
+ check(a==WANT[et],'Type %s: only its own processing runs on the echoes (%s)'%(name,', '.join(k for k in a if a[k]) or 'stock delay only'))
+# Switching type: the previous type's processing fades out (5 ms) and stops.
+u,r=looper(etype=1)
+r.blk([(0x3a,1000),(0x4b,1),(0x4a,12),(0x1a8,1000),(0x1a7,1000),(ECHO,1000)]);r.run(200)
+check(active(u)['tape'],'Tape selected: tape stage on')
+r.blk([(ETYPE,2)]);r.run(20)
+a=active(u);check(not a['tape'] and a['duck'],'switched to Duck: the tape stage is off, ducking on (%s)'%a)
+r.blk([(ETYPE,3)]);r.run(20)
+check(not any(v for k,v in active(u).items() if k!='send'),'switched to Delay: nothing but the stock delay')
 print('PASSED',H.checks,'Phrase Looper Echo checks; sound and real CPU load remain hardware tests.')

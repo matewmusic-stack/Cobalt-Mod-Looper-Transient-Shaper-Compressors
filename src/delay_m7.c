@@ -182,7 +182,12 @@ static void dly_prepare(struct dly_shared *d, unsigned n)
     /* drift (id "flutter"): a slow 0.6 Hz wobble plus a slower random wander; extra delay 0 .. 2A, A up to 8 ms
      * (about +-2.5 % pitch at full) */
     float depth = rv_clamp((float)d->flutter * 1e-3f, 0.f, 1.f);
+#ifdef PHRASE_LOOPER
+    /* Looper echo type Delay: the stock delay only, no Drift or Pitch. */
+    if(XS->magic==X_MAGIC && (x_kind(XS)==3 || x_kind(XS)==5))depth=0.f;
+#else
     if(XS->magic==X_MAGIC && x_kind(XS)==3)depth=0.f;
+#endif
     float fa = depth * 0.008f * D_FS;
     d->fl_ph += 0.6f * (float)n / D_FS;
     if (d->fl_ph >= 1.f) d->fl_ph -= 1.f;
@@ -193,7 +198,11 @@ static void dly_prepare(struct dly_shared *d, unsigned n)
     d->m1 = fa > 0.f ? fa * (1.f + 0.6f * s + 0.4f * d->fl_noise) : 0.f;
     if (d->m0 <= 0.f && d->m1 > 0.f) d->m0 = d->m1;                   /* drift just turned on: no jump from 0 */
 
+#ifdef PHRASE_LOOPER
+    int st = d->pitch_on && x_kind(XS)!=2 && x_kind(XS)!=5 ? d->pitch : 0;
+#else
     int st = d->pitch_on && x_kind(XS)!=2 ? d->pitch : 0;
+#endif
     if (st < -12) st = -12;
     if (st > 12) st = 12;
     d->p_ratio = rv_exp2((float)st * (1.f / 12.f));
@@ -486,6 +495,9 @@ unsigned dly_process(uint8_t *obj, void *ctx)
 
     /* keep Send x wet for the reverb's next block */
     float g = rv_clamp((float)d->send * 1e-3f, 0.f, 1.f);
+#ifdef PHRASE_LOOPER
+    if(XS->magic==X_MAGIC && x_kind(XS)==5)g=0.f;   /* echo type Delay: no send to the reverb, as stock */
+#endif
     float g0 = d->send_g;
     d->send_g = g;
     struct bus *b = (struct bus *)bus;
