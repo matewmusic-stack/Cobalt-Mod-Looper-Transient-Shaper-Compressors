@@ -1125,7 +1125,7 @@ static void lp_song_tempo(void) {
     uint32_t x=((uint32_t)dt*6250u+ms/2u)/ms;  /* ticks/ms x 62.5 = BPM; x100 */
     if(x>=2000u && x<=30000u)b->hm_x100=x;
 }
-/* Header: the detected tempo, right of the bar count ("13:1 128.0").
+/* Header: the detected tempo, right of the bar count ("13:1 128").
  * Replaces the header's snprintf(buf,16,"%d:%d",bar,beat) call (0x08139810);
  * the next header label is placed after this text's measured width. The
  * tempo: with the Phrase Looper in FX1, its sample-accurate measurement;
@@ -1138,13 +1138,15 @@ void lp_header_bar(char *buf,unsigned n,const char *fmt,int bar,int beat) {
     if(*(void *const *)(fx1+4) && fw_get(fx1,0x1a0u)==1 && LP_PL->magic==PL_MAGIC)x=LP_PL->song_x100;
     if(!x){struct sc_bank *b=sc_bank();if(b)x=b->hm_x100;}
     if(!x && LP_TEMPO->magic==PL_TEMPO_MAGIC)x=LP_TEMPO->clock_x100;
-    unsigned t=(x+5u)/10u;                      /* tenths of a BPM */
-    if(t<200u || t>3000u)return;
+    /* Whole BPM, rounded: the header label clips anything past ~8
+     * characters, and a clipped "125.9" would read as 125. */
+    unsigned t=(x+50u)/100u;
+    if(t<20u || t>300u)return;
     unsigned k=0;while(k<n && buf[k])k++;
     char s[8];unsigned j=0;
     s[j++]=' ';
-    if(t>=1000u)s[j++]=(char)('0'+t/1000u);
-    s[j++]=(char)('0'+t/100u%10u);s[j++]=(char)('0'+t/10u%10u);s[j++]='.';s[j++]=(char)('0'+t%10u);
+    if(t>=100u)s[j++]=(char)('0'+t/100u);
+    s[j++]=(char)('0'+t/10u%10u);s[j++]=(char)('0'+t%10u);
     if(k+j+1u>n)return;
     for(unsigned i=0;i<j;i++)buf[k+i]=s[i];
     buf[k+j]=0;

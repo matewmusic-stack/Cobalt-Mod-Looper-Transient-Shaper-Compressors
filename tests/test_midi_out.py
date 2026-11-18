@@ -342,6 +342,6 @@ if LOOPER_BUILD:
  for _ in range(60):main(7)                          # stopped: last value kept
  h4=header(14,1)
  print('INFO header (FX1 not looper):',h1,'|',h2,'|',h3,'|',h4)
- check((h1,h2,h3,h4)==('13:1 126.0','13:1 128.0','13:1 122.4','14:1 122.4'),'header shows the tempo measured from the song position in any FX1 mode: 126, 128, 122.37 -> 122.4, kept while stopped')
+ check((h1,h2,h3,h4)==('13:1 126','13:1 128','13:1 122','14:1 122'),'header shows the tempo measured from the song position in any FX1 mode, rounded to whole BPM: 126, 128, 122.37 -> 122, kept while stopped')
 
 print(H.checks,"checks passed")
