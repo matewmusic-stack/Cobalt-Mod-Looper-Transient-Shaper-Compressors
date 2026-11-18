@@ -469,6 +469,19 @@ At the recorded tempo both modes play the loop unchanged. While stretched, overd
 
 All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `3f14345a…`, `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
 
+Version 10 (`3f14345a…`), clocked by the Blackbox at 128 BPM, taking a 2-bar loop:
+
+| | |
+|---|---|
+| ![Looper empty, measured tempo](images/hardware/v10-looper-empty-tempo.jpg) | ![ARMED](images/hardware/v10-armed.jpg) |
+| **Empty:** the title shows the tempo measured from the song position, `Lp128.0`. Left: REC, CLEAR. Knob group 1: Bars, Stretch (`Keep`), Level. Group 2: Time (`1/8`), Echo, Feedb. Right: Ping, Sync | **ARMED:** REC pressed while the song plays; the take waits for the next bar line |
+| ![REC 1/2](images/hardware/v10-rec-1-of-2.jpg) | ![REC 2/2](images/hardware/v10-rec-2-of-2.jpg) |
+| **REC 1/2:** recording the first of 2 bars | **REC 2/2:** the second bar; the take closes on the bar line |
+| ![PLAY, OVDUB](images/hardware/v10-play-ovdub.jpg) | ![TOOLS capacity readout](images/hardware/v10-tools-capacity.jpg) |
+| **PLAY:** the loop plays in step; the REC button now reads `OVDUB` | **TOOLS:** `L4.0s` longest loop, `F1…` about 1 MB free when FX1 was built |
+
+Earlier builds:
+
 | | |
 |---|---|
 | ![FX1 mode menu](images/hardware/fx1-mode-menu.jpg) | ![Empty looper](images/hardware/looper-page-empty.jpg) |
@@ -485,12 +498,13 @@ Confirmed on that unit:
 - tempo: a 1-bar loop at 120 BPM lasts 2 s (earlier build);
 - with the sequencer running, REC waits for the bar line, and the loop stays on the beat over many passes (`73d9066f…`);
 - with the Blackbox as master clock, the loop follows project changes with slightly different tempos (e.g. 126 → 128), and the looper detects the external tempo and records the next loop in sync without touching the bluebox BPM (`1438c1ad…`);
+- 2-bar takes at 128 BPM on the bar lines: ARMED, REC 1/2, REC 2/2, PLAY (photos above);
 - version 10 (`3f14345a…`) installed and tested: Echo on the loop, the new page layout and knob groups, transport stop, OVDUB and the Sync lock;
 - the free arena when FX1 is built is only about 1 MB, so the looper uses the tested 768,000-byte buffer: 4 s, which is 2 bars at 120 BPM or faster. An earlier 32-bit build fell back to 1 bar for this reason (title `REC 1/1`).
 
 Not yet confirmed on hardware:
 
-- recording 2 bars at 120 BPM with the 16-bit buffer;
+- 2 bars at exactly 120 BPM, the length of the 4 s buffer (2-bar takes at 128 BPM are confirmed, see the photos);
 - REC, STOP and CLEAR switching themselves off, and auto-mute of the tracks feeding FX1;
 - Stretch Vari and Keep by ear;
 - a take started by pressing start with Sync on (it begins when the position first moves, up to 0.7 ms after the downbeat);
