@@ -172,7 +172,7 @@ for st,sn in [(0,'Off'),(1,'Vari'),(2,'Keep')]:
 print('INFO worst block with Ping, by Stretch x echo type:',worst)
 for k,v in worst.items():
  if v<16829:check(True,'Ping + Stretch %s + %s echo: within the tested Granular range (worst %d)'%(k[0],k[1],v))
- else:print('WARN Ping + Stretch %s + %s echo: worst block %d instructions, above the hardware-tested Granular (16829): check the CPU meter on the bluebox'%(k[0],k[1],v))
+ else:print('WARN Ping + Stretch %s + %s echo: worst block %d instructions, above the hardware-tested Granular (16829); on the bluebox the CPU bar stayed green with Keep + Tape + Ping'%(k[0],k[1],v))
 check(all(worst[(st,et)]<16829 for st in ('Off',) for et in ('Warp','Tape','Duck')) and all(worst[(st,'Warp')]<16829 for st in ('Vari','Keep')),'Stretch Off with any echo type, and Warp echo with any Stretch: within the tested range')
 check(max(worst.values())<20000,'every combination stays under 20k instructions (worst %d)'%max(worst.values()))
 # ------------------------------- exactly one echo type at a time
