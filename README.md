@@ -105,7 +105,7 @@ Encoders 1–4 turn Attack, Sustain, Speed and Length. Tap Model, Output or Mix 
 
 **How it works.** Ten new per-track settings, `0x1be`–`0x1c7`, in empty stock definition slots (track settings lists: 62 of 68 entries used). The M7 runs the shaper and compressor after the old gate point in each track's chain, with state in one SDRAM block allocated at boot (`ts_allocate`). The M4 code (`src/transient_m4.h`) lives in the cue-icon payload, because the Cobalt M4 code space is full. It rebinds the TRACK panel's eight knobs from a new page flag (2 = page 3, 3 = page 4), relabels them, and draws the boxes. `tests/test_transient_page.py` drives the TRACK button cycle, the knobs, the labels and the MIXER column through the real UI code in the emulator. The old Gate tests are kept in `tests/retired_gate/`.
 
-**Hardware:** build `ddb1f45d…` on the same bluebox: the TRACK cycle to pages 3 and 4, the TRANSIENT button, the page-3 labels and the compressor page were confirmed. In one case the TRACK view came back with the page-3 names (MODEL, OUTPUT, MIX) on the VOL, PAN and GAIN knobs (photo 1 below). The knobs still turned VOL, PAN and GAIN; only the names were wrong. The current build `c699a6d0…` checks those three names on every frame and puts the right ones back, which is tested in the emulator but not yet on the device. The sound of each model and mode, and the CPU load with many tracks, have not been checked in detail.
+**Hardware:** build `ddb1f45d…` on the same bluebox: the TRACK cycle to pages 3 and 4, the TRANSIENT button, the page-3 labels and the compressor page were confirmed. In one case the TRACK view came back with the page-3 names (MODEL, OUTPUT, MIX) on the VOL, PAN and GAIN knobs (photo 1 below). The knobs still turned VOL, PAN and GAIN; only the names were wrong. The current build `c699a6d0…` checks those three names on every frame and puts the right ones back; confirmed on the device. The sound of each model and mode, and the CPU load with many tracks, have not been checked in detail.
 
 | | | |
 |---|---|---|
@@ -114,7 +114,7 @@ Encoders 1–4 turn Attack, Sustain, Speed and Length. Tap Model, Output or Mix 
 
 ## Hardware testing (one device)
 
-All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the looper images `ddb1f45d…` (transient shaper and compressor; the current `c699a6d0…` only adds the knob-name fix), `162a50a3…`, `c2c58e04…` (header tempo rounded), `e7dd3237…` (header tempo with the decimal), `f4fab10b…` (version 12), `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `c699a6d0…` (the knob-name fix), `ddb1f45d…` (transient shaper and compressor), `162a50a3…`, `c2c58e04…` (header tempo rounded), `e7dd3237…` (header tempo with the decimal), `f4fab10b…` (version 12), `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
 
 Build `162a50a3…`, clocked by the Blackbox at 126 BPM:
 
@@ -184,6 +184,7 @@ Confirmed on that unit:
 - with the Blackbox as master clock, the loop follows project changes with slightly different tempos (e.g. 126 → 128), and the looper detects the external tempo and records the next loop in sync without touching the bluebox BPM (`1438c1ad…`);
 - 2-bar takes at 128 BPM on the bar lines: ARMED, REC 1/2, REC 2/2, PLAY (photos above);
 - version 10 (`3f14345a…`) installed and tested: Echo on the loop, the new page layout and knob groups, transport stop, OVDUB and the Sync lock;
+- current build `c699a6d0…`: the TRACK view always comes back with VOL, PAN and GAIN;
 - build `ddb1f45d…`: the TRACK button cycle (view → Side Chain → page 3 → page 4), the TRANSIENT button in the TRACK view and MIXER, the page-3 shaper labels and the page-4 compressor page;
 - build `162a50a3…`: the new layout (Sync in knob group 1, BEAT bottom right), the header tempo in full past bar 100 (`104:2 126`, bar-count label widened from 100 to 124 px), TOOLS `4s 1.5M` inside its field (photos above);
 - build `c2c58e04…`: the header tempo rounded to whole BPM (`128`, `126`), ARMED, REC 1/2 and 2/2 on the bar lines, OVDUB, echo types Warp, Duck and Delay, Ping, and the loop following the Blackbox from 128 to 126 with Stretch Keep and Vari (photos above);
@@ -194,7 +195,6 @@ Confirmed on that unit:
 
 Not yet confirmed on hardware:
 
-- the knob-name fix in `c699a6d0…` (the TRACK view always back to VOL, PAN, GAIN);
 - 2 bars at exactly 120 BPM, the length of the 4 s buffer (2-bar takes at 128 BPM are confirmed, see the photos);
 - REC, STOP and CLEAR switching themselves off, and auto-mute of the tracks feeding FX1;
 - Stretch Vari and Keep by ear;
