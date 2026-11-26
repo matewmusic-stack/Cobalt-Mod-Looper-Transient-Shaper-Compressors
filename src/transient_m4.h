@@ -115,6 +115,20 @@ static void ts_labels(uint8_t *p) {
     ts_label(p+0xc768,pg3?"OUTPUT":"PAN");
     ts_label(p+0xcb38,pg3?"MIX":"GAIN");
 }
+/* Every frame: any path that changes the page flag without our rebind (seen
+ * on hardware: MODEL/OUTPUT/MIX left on the TRACK view) is corrected here.
+ * Only a label that differs is rewritten, so nothing is redrawn needlessly. */
+static int ts_label_is(const uint8_t *w,const char *t) {
+    const char *d=(const char *)w+0xf8;unsigned i=0;
+    for(;t[i];i++)if(d[i]!=t[i])return 0;
+    return d[i]==0;
+}
+static void ts_labels_sync(uint8_t *p) {
+    int pg3=ts_page3(p);
+    static const uint16_t o[3]={0xc398,0xc768,0xcb38};
+    static const char *const n[2][3]={{"VOL","PAN","GAIN"},{"MODEL","OUTPUT","MIX"}};
+    for(unsigned i=0;i<3;i++)if(!ts_label_is(p+o[i],n[pg3][i]))ts_label(p+o[i],n[pg3][i]);
+}
 /* After the native (and Gate) binding of channel ch. */
 static void ts_track_bind(uint8_t *p,unsigned ch) {
     ts_restore(p);
@@ -399,6 +413,7 @@ static void ts_draw(const uint8_t *d) {
     if(!((fmt==1u && bpp==4u)||(fmt==2u && bpp==3u)||((fmt==3u||fmt==4u) && bpp==2u)))return;
     uint8_t *p=ts_panel();
     if(!p)return;
+    ts_labels_sync(p);
     uint32_t fg=theme_knob_palette[3]&0xffffffu,accent=theme_knob_palette[34]&0xffffffu,dim=0xaaaaaau,on_c=0x22bb22u;
     uint8_t *b=p+0xde48;
     if(ts_page4(p)) {

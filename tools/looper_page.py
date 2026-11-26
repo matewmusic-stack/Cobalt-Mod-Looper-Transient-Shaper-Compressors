@@ -43,13 +43,31 @@ STYLE = ('<style>.looper-table{border-collapse:collapse;width:100%;margin:8px 0 
          '.looper-table tr+tr th,.looper-table tr+tr td{border-top:1px solid rgba(127,127,127,.25)}</style>\n')
 
 
+# TRACK pages 3 and 4, drawn from hardware photos of build ddb1f45d.
+TS_HELPERS = (
+    "const TS_ON='#22bb22',TS_DIM='#aaaaaa';"
+    "function tsBox(P,cx,cy,a,b,bc,c){P.rect(cx-23,cy-17,46,44,WELL);if(a)P.text(cx,cy-3,a,'knob',8);"
+    "if(b)P.text(cx,cy+9,b,bc,8);if(c)P.text(cx,cy+21,c,'text',8);}\n"
+    "function tsPage(P,body){base(P,'1');strip(P,20,126,{master:.12,tracks:[{state:'sel'},{},{level:.06}]});"
+    "P.rect(0,127,320,18,'button_idle');P.text(160,141,'1','text',14);P.rect(0,146,30,94,WELL);"
+    "P.poly('2,152 2,160 7,156','text');P.text(8,160,'0dB','text',8,'start');body();P.rect(130,147,90,92,'none','accent',1.6);"
+    "button(P,220,147,50,46,'','button_idle',9,['SIDE','CHAIN']);button(P,270,147,50,46,'MUTE','button_idle',9,null,15);"
+    "button(P,220,193,50,47,'REC','button_idle',9,null,15);button(P,270,193,50,47,'SOLO','button_idle',9,null,15);}\n")
+TS_DRAW = (
+    " trans(P){tsPage(P,()=>{tsBox(P,57,165,'MODEL','SMOOTH','text');knob(P,105,165,'OUTPUT',.5);knob(P,57,209,'MIX',.95);"
+    "tsBox(P,105,209,'TRANS','ON',TS_ON,'4 LENGTH');knob(P,152,165,'ATTAC',.5);knob(P,197,165,'SPEED',.5);"
+    "knob(P,152,209,'SUSTA',.5);knob(P,197,209,'LENGT',.5);});},\n"
+    " comp(P){tsPage(P,()=>{[[57,165],[105,165],[57,209],[197,165],[197,209]].forEach(([x,y])=>tsBox(P,x,y));"
+    "tsBox(P,105,209,'COMP','PAGE 4',TS_DIM);tsBox(P,152,165,'MODE','LIMIT',TS_ON);knob(P,152,209,'THRES',.67);});},\n")
+
+
 def adapt(page, manifest):
     v = manifest['version']
     swaps = [
-        ('<title>Bluebox Cobalt mod</title>', '<title>Bluebox Cobalt Phrase Looper</title>'),
+        ('<title>Bluebox Cobalt mod</title>', '<title>Bluebox Cobalt: Looper, Transient Shaper, Compressors</title>'),
         ('content="Patch the Bluebox desktop 1.5.2 firmware with the Cobalt mod and a custom colour theme, locally in your browser."',
          'content="Patch the Bluebox desktop 1.5.2 firmware with Cobalt, the FX1 Phrase Looper and a per-track transient shaper and compressor, locally in your browser."'),
-        ('<h1>Bluebox Cobalt mod</h1>', '<h1>Bluebox Cobalt + Phrase Looper</h1>'),
+        ('<h1>Bluebox Cobalt mod</h1>', '<h1>Bluebox Cobalt: Looper, Transient Shaper, Compressors</h1>'),
         ('Unofficial effects &amp; theme mod for bluebox desktop firmware 1.5.2 · v' + v,
          'Cobalt v' + v + ' with an FX1 Phrase Looper and per-track transient shaper + compressor, for bluebox desktop firmware 1.5.2 · experimental'),
         ('<a class="chip jump" href="#guide">New in v1.1: scenes and MIDI ›</a>',
@@ -62,11 +80,21 @@ def adapt(page, manifest):
         ('<section id="guide">', GUIDE + '<section id="guide">'),
         ('<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup.</p>',
          '<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup. '
-         '<b>The Phrase Looper build has been tested on one bluebox desktop only.</b> '
-         '<a href="https://github.com/matewmusic-stack/Cobalt-Phrase-Looper#hardware-testing-one-device">What was tested</a></p>'),
+         '<b>This build has been tested on one bluebox desktop only.</b> '
+         '<a href="https://github.com/matewmusic-stack/Cobalt-Mod---Looper-Transient-Shaper-Compressors#hardware-testing-one-device">What was tested</a></p>'),
         # Theme preview: the FX1 mode list (B on the FX page).
         ("listRows(P,['Delay','Warp delay','Granular','Tape','Ducked','Reverse']",
          "listRows(P,['Delay','Warp delay','Phrase Looper','Tape','Ducked','Reverse']"),
+        # Theme preview: the Gate is now the TRANSIENT button, and TRACK has pages 3 and 4.
+        ("P.text(197,201,'GATE','knob',8);P.text(197,211,'OFF','text',8);P.text(197,221,'OFF','text',8);",
+         "P.text(197,203,'TRANS','knob',8);P.text(197,215,'ON',TS_ON,8);"),
+        ("['sidechain','TRACK','Side chain'],",
+         "['sidechain','TRACK','Side chain'],['trans','TRACK','Page 3 · Transient'],['comp','TRACK','Page 4 · Comp'],"),
+        (' main(P){base(P);', TS_DRAW + ' main(P){base(P);'),
+        ('function trackPage(', TS_HELPERS + 'function trackPage('),
+        ('Knob arcs and pointers, GATE label, XY pad markers', 'Knob arcs and pointers, TRANS label, XY pad markers'),
+        ('and Gate state colours are drawn', 'and TRANS on/off colours are drawn'),
+        ("'compressor','EQ','gate','the master", "'compressor','EQ','the master"),
         ('</head>', STYLE + '</head>') if '</head>' in page else ('<header>', STYLE + '<header>'),
     ]
     for old, new in swaps:

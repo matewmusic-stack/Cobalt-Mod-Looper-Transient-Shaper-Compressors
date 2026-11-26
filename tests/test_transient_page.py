@@ -143,6 +143,14 @@ check([lbl(o) for o in (0xc398,0xc768,0xcb38)]==[b'VOL',b'PAN',b'GAIN'],'page 1 
 check(val(T+0xde48)==1,'TRANSIENT knob back with this track\'s ON')
 texts.clear();h=u.hook_add(UC_HOOK_CODE,text_hook,begin=C4['ts_text'],end=C4['ts_text']);call(u,C4['cue_present'],0,0,0,0);u.hook_del(h)
 check(texts==['TRANS','ON'],'page 1 draws the TRANSIENT button '+str(texts))
+# Hardware: MODEL/OUTPUT/MIX were seen on the TRACK view (the flag changed
+# without a rebind). A frame draw puts the right names back.
+for o,n in ((0xc398,b'MODEL'),(0xc768,b'OUTPUT'),(0xcb38,b'MIX')):u.mem_write(T+o+0xf8,n+b'\0')
+call(u,C4['cue_present'],0,0,0,0)
+check([lbl(o) for o in (0xc398,0xc768,0xcb38)]==[b'VOL',b'PAN',b'GAIN'],'a frame on page 1 corrects stale page-3 names to VOL/PAN/GAIN')
+for o in (0xc398,0xc768,0xcb38):u.mem_write(T+o+0x9c,b'\0')
+call(u,C4['cue_present'],0,0,0,0)
+check(all(u.mem_read(T+o+0x9c,1)[0]==0 for o in (0xc398,0xc768,0xcb38)),'correct names are left alone (no redraw flag)')
 # From any other page TRACK returns to the remembered TRACK view, as native.
 w32(u,ROOTUI+0x2b4,P)
 key(8,5);check(pages==[(APPOBJ,5)] and u.mem_read(0x388001f0,1)[0]==0,'from another page TRACK opens the remembered TRACK view')
