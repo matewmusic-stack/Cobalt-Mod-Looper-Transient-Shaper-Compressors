@@ -74,16 +74,8 @@ while val()<1000 and n<3000:turn(40);n+=1
 print('INFO Diffusion native full sweep',n*40,'units')
 check(abs(n*40-40000)<=400,'Diffusion keeps its native ~40000-unit travel')
 
-# ---- 3. Gate fast acceleration is softer than exp.7 (same widget/clock fixture).
-import gate_ui_fixture as GU
-def gate_sweep(img_symbols,delta,ms):
- GU.setup(1,0,-96000);w32(GU.u,0x38800a40+8,0);n=0;k=GU.P+0xbe0+0x8f0
- while GU.val(k)!=-12000 and n<400:
-  GU.clock[0]+=ms;w32(GU.u,CLOCK,GU.clock[0]);call(GU.u,img_symbols['gate_turn'],k,delta&0xffffffff);GU.flush();n+=1
- return n
-n8=gate_sweep(GU.S,160,10)
-print('INFO Gate fast sweep events exp.8:',n8,'(exp.7: 14)')
-check(18<=n8<=40,'Gate fast sweep is gentler than exp.7 but still quick (%d events)'%n8)
+# ---- 3. (Gate acceleration check retired with the Gate: TRANSIENT replaced
+# its TRACK and MIXER controls. See tests/retired_gate/.)
 
 # ---- 4. Tape: list, layout, Lo C, native filter bypass.
 pair=lambda:(dsetup(ref)[0],dsetup()[0])

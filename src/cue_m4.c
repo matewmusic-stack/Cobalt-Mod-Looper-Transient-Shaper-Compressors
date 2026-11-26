@@ -98,8 +98,11 @@ static void cue_draw(const uint8_t *d) {
     }
 }
 /* Present chain: cue state, then Scenes feedback, then Cobalt's meters and flip. */
+#include "transient_m4.h"
 void cue_present(void *display,int layer,int a2,int a3) {
-    cue_draw(((const uint8_t *(*)(void *,int))0x0810139bu)(display,layer));
+    const uint8_t *back=((const uint8_t *(*)(void *,int))0x0810139bu)(display,layer);
+    cue_draw(back);
+    ts_draw(back);
     pc_present(display,layer,a2,a3);
 }
 #ifdef PHRASE_LOOPER

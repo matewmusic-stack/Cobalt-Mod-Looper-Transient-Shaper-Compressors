@@ -26,6 +26,15 @@ GUIDE = '''<section id="looper"><h2>Using the Phrase Looper</h2>
 <p class="muted">REC and CLEAR act once per press and never stay lit. While the loop plays, the tracks feeding FX1 are muted automatically, so you hear only the loop. They are unmuted while you record or overdub, and when you stop, clear or leave the looper. Tracks you muted yourself are never touched.</p>
 <p class="muted">Loops are stored as 16-bit audio. The TOOLS page shows the longest loop, for example <code>4s 1.5M</code>: a 4-second loop is 2 bars at 120 BPM or faster. When 2 bars don’t fit, the loop is 1 bar and the title shows REC 1/1. Switching FX1 to another mode empties the loop.</p>
 </section>
+<section id="transient"><h2>Transient shaper and compressor</h2>
+<p class="muted">This build replaces Cobalt's per-track noise gate with a <b>transient shaper</b> and adds a per-track <b>compressor</b>, both ported from Joebox. The <b>TRACK</b> button now cycles: TRACK view → Side Chain → page 3 (transient) → page 4 (compressor) → TRACK view.</p>
+<table class="looper-table">
+<tr><th>TRANSIENT</th><td>On/off per track: the bottom-right knob of the TRACK view (beside OUT2, where GATE was; tap it or turn encoder 4), or the MIXER <b>Trans</b> column.</td></tr>
+<tr><th>Page 3</th><td>Encoders: Attack (&minus;100…+100&nbsp;%), Sustain (&minus;100…+100&nbsp;%), Speed, Length. Tap Model (Differ / Punch / Smooth), Output (&plusmn;12&nbsp;dB) or Mix to put it on encoder 4; tap Length to give it back. Attack and Sustain at 0 with Output 0&nbsp;dB leave the sound unchanged.</td></tr>
+<tr><th>Page 4</th><td>Encoder 1: Comp mode, Off / Glue / Punch / Opto / Squash / Limit (Limit without lookahead). Encoder 2: Thresh, &minus;24…+12&nbsp;dB (for Limit: the drive into a &minus;0.3&nbsp;dBFS ceiling). The compressor runs after the shaper, whether TRANSIENT is on or off.</td></tr>
+</table>
+<p class="muted">Settings are saved per track in the project. Saved Gate thresholds from older projects are ignored.</p>
+</section>
 '''
 
 STYLE = ('<style>.looper-table{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:14px}'
@@ -39,12 +48,12 @@ def adapt(page, manifest):
     swaps = [
         ('<title>Bluebox Cobalt mod</title>', '<title>Bluebox Cobalt Phrase Looper</title>'),
         ('content="Patch the Bluebox desktop 1.5.2 firmware with the Cobalt mod and a custom colour theme, locally in your browser."',
-         'content="Patch the Bluebox desktop 1.5.2 firmware with Cobalt and the FX1 Phrase Looper, locally in your browser."'),
+         'content="Patch the Bluebox desktop 1.5.2 firmware with Cobalt, the FX1 Phrase Looper and a per-track transient shaper and compressor, locally in your browser."'),
         ('<h1>Bluebox Cobalt mod</h1>', '<h1>Bluebox Cobalt + Phrase Looper</h1>'),
         ('Unofficial effects &amp; theme mod for bluebox desktop firmware 1.5.2 · v' + v,
-         'Cobalt v' + v + ' with an FX1 Phrase Looper, for bluebox desktop firmware 1.5.2 · experimental'),
+         'Cobalt v' + v + ' with an FX1 Phrase Looper and per-track transient shaper + compressor, for bluebox desktop firmware 1.5.2 · experimental'),
         ('<a class="chip jump" href="#guide">New in v1.1: scenes and MIDI ›</a>',
-         '<a class="chip jump" href="#looper">Using the Phrase Looper ›</a><a class="chip jump" href="#guide">Scenes and MIDI ›</a>'),
+         '<a class="chip jump" href="#looper">Using the Phrase Looper ›</a><a class="chip jump" href="#transient">Transient + compressor ›</a><a class="chip jump" href="#guide">Scenes and MIDI ›</a>'),
         ('Restore the original from a Cobalt ' + v + ' firmware file',
          'Restore the original from a Cobalt ' + v + ' + Phrase Looper firmware file'),
         ('Generate a new BLUEBOX.BIN and install it with your usual SD-card procedure.',

@@ -1,11 +1,13 @@
 #include "shared.h"
 #include "noise_gate.h"
 #include "gate_diag_m7.h"
+#include "transient_m7.h"
 #define NG_MAGIC 0x4e473937u
 struct gate_bank {uint32_t magic;struct noise_gate track[12];float input_peak[12][2];uint8_t *meter_ctx;};
 #define NG_BANK ((struct gate_bank *)0x38800400u)
 _Static_assert(sizeof(struct noise_gate)==40,"gate track ABI");
 _Static_assert(0x400+sizeof(struct gate_bank)<=0x680,"gate before diagnostic reports");
+_Static_assert(0x400+sizeof(struct gate_bank)<=0x650,"gate before transient link");
 _Static_assert(0x400+sizeof(struct gate_bank)<=0xb00,"gate below M4 UI state");
 struct ng_bus {uint32_t cap,n;float *l,*r;uint8_t silent,stereo;};
 struct ng_event {uint8_t type,pad[7];uint32_t target;uint16_t id,pad2;int32_t value;uint32_t pad3;};
@@ -33,9 +35,15 @@ unsigned gate_process(uint8_t *obj,void *ctx) {
     struct noise_gate *g=&ng_bank()->track[ch];if(g->owner!=obj)ng_reset(g,obj);
     void *q=((void *(*)(void *,unsigned))0x080532d5u)(ctx,ch);
     struct ng_event ev;
+    struct ts_track *ts=ts_track(ch,obj);
     unsigned received=0;
-    for(unsigned i=0;((int (*)(void *,unsigned,void *))0x0804e1b9u)(q,i,&ev);i++)
-        if(ev.type==0x39 && ev.target==ch && ev.id==NG_ID){ng_event(g,ev.value);received++;}
+    for(unsigned i=0;((int (*)(void *,unsigned,void *))0x0804e1b9u)(q,i,&ev);i++) {
+        if(ev.type!=0x39 || ev.target!=ch)continue;
+        /* The Gate is retired (its TRACK and MIXER controls are TRANSIENT):
+         * saved thresholds are ignored, so every track's gate stays Off. */
+        if(ev.id==NG_ID)received++;
+        else if(ts && TS_ID(ev.id))ts_event(ts,ev.id,ev.value);
+    }
     /* Outside Gate metering, Off keeps the original cheap exact bypass.
      * Native report wrappers retain the M7 mixer pointer, never an M4 pointer. */
     uint8_t *mix=NG_BANK->meter_ctx;
@@ -56,6 +64,23 @@ unsigned gate_process(uint8_t *obj,void *ctx) {
         if(active) {
             if(bus->silent || !bus->n)ng_process_peak(g,0,0,n,0.f);
             else ng_process_peak(g,bus->l,bus->stereo?bus->r:0,n,left>right?left:right);
+        }
+    }
+    /* Transient shaper (TRACK page 3) after the gate, before the native EQ. */
+    /* Then the page 4 compressor (Joebox modes, no lookahead) when not Off. */
+    if(ts && (ts_active(ts) || ts->cmode)) {
+        unsigned port=(*(unsigned (**)(void *))(*(uint32_t *)obj+0x54))(obj);
+        struct ng_bus *bus=((struct ng_bus *(*)(void *,unsigned))0x0805331du)(ctx,port);
+        unsigned n=((unsigned (*)(void *))0x0804cd41u)(bus);if(n>32)n=32;
+        if(!bus->silent && bus->n && bus->l) {
+            float *r=bus->stereo?bus->r:0;
+            if(ts_active(ts))ts_process(&ts->s,&ts->p,bus->l,r,(int)n);
+            if(ts->cmode) {
+                /* Mono: the stereo-linked detector sees L on both sides. */
+                float mono[32];
+                if(!r){for(unsigned i=0;i<n;i++)mono[i]=bus->l[i];r=mono;}
+                jc_process(&ts->cs,JC_GLUE-1+ts->cmode,ts->cthresh,bus->l,r,(int)n);
+            }
         }
     }
     gd_audio_tick(ch,g,received,diag_left,diag_right,active || metering);

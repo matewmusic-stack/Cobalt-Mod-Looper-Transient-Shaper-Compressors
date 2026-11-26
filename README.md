@@ -1,10 +1,10 @@
 # Cobalt + Phrase Looper for 1010music bluebox desktop
 
-**Cobalt 1.2.0 + an FX1 Phrase Looper with Echo - for bluebox desktop firmware 1.5.2**
+**Cobalt 1.2.0 + an FX1 Phrase Looper with Echo + a per-track transient shaper and compressor - for bluebox desktop firmware 1.5.2**
 
-This repository is the [Cobalt](https://github.com/sbsmnt/bluebox-cobalt-mod) firmware mod with one addition: a **Phrase Looper** in FX1, in place of the Granular mode, with **Echo** (the stock FX1 delay played on the loop).
+This repository is the [Cobalt](https://github.com/sbsmnt/bluebox-cobalt-mod) firmware mod with two additions: a **Phrase Looper** in FX1, in place of the Granular mode, with **Echo** (the stock FX1 delay played on the loop), and a per-track **TRANSIENT** shaper and **compressor** (ported from Joebox) in place of Cobalt's noise gate.
 
-- **Part 1** (below) is what this repository adds: the Phrase Looper and Echo.
+- **Part 1** (below) is what this repository adds: the Phrase Looper, Echo, and the transient shaper and compressor.
 - **Part 2** is the original Cobalt 1.2.0 documentation, unchanged. Everything in it still applies.
 
 **Open the looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)** - it runs locally in your browser on your own copy of the official 1.5.2 firmware. No firmware is distributed here.
@@ -20,14 +20,16 @@ This repository is the [Cobalt](https://github.com/sbsmnt/bluebox-cobalt-mod) fi
 - **Echo:** Time, Feedb, Echo and **Type** knobs plus a **Ping** button run the stock FX1 delay on the loop, in time with the song, as one delay type at a time: Warp, Tape, Duck(ed) or Delay.
 - **Auto-mute** of the tracks feeding FX1 while the loop plays.
 - **Detected tempo in the header,** right of the bar count, in every FX1 mode (measured from the song position, so it shows an external master's tempo).
+- **TRANSIENT per track** (replaces Cobalt's Gate): on/off on the TRACK page (bottom-right knob, beside OUT2) and in a MIXER **Trans** column. Its settings are on **TRACK page 3**: Model (Differ / Punch / Smooth), Attack, Sustain, Speed, Length, Output and Mix.
+- **Compressor per track on TRACK page 4:** Glue, Punch, Opto, Squash or Limit (the Joebox master compressor modes, Limit without lookahead) and Thresh.
 
-# Part 1 - Added in this repository: Phrase Looper + Echo
+# Part 1 - Added in this repository: Phrase Looper + Echo, transient shaper + compressor
 
 > **Tested on one device only.** The Phrase Looper build has been installed and tried on a single bluebox desktop running firmware 1.5.2. It has not been tested on any other unit. See [Hardware testing](#hardware-testing-one-device) for what was checked. Keep the official firmware so you can go back.
 
 ## Install
 
-**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)** publishes the current build (default theme SHA-256 `162a50a3…`): locked to the song position, bar-quantized REC, Stretch, tempo measured from the song position (so it follows an external master clock), the loop following the transport, and Echo, the stock FX1 delay played on the loop and the live FX1 sends with a choice of delay type and its own Beat sync. This build has been tried on hardware. Drop in the original desktop 1.5.2 `BLUEBOX.BIN`; everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN`. **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included. `LOOPER=1 ./build.sh` does not touch the live page; `LOOPER=1 PUBLISH=1 ./build.sh` replaces `docs/looper/index.html` when a build is ready.
+**Looper web patcher: [matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper](https://matewmusic-stack.github.io/Cobalt-Phrase-Looper/looper/)** publishes the current build (default theme SHA-256 `ddb1f45d…`): the per-track TRANSIENT shaper and compressor (TRACK pages 3 and 4) in place of the Gate, and the Phrase Looper, locked to the song position, bar-quantized REC, Stretch, tempo measured from the song position (so it follows an external master clock), the loop following the transport, and Echo, the stock FX1 delay played on the loop and the live FX1 sends with a choice of delay type and its own Beat sync. This build has been tried on hardware. Drop in the original desktop 1.5.2 `BLUEBOX.BIN`; everything runs locally: the page checks the file, applies the looper patch with your theme, and offers the new `BLUEBOX.BIN`. **Restore** gives back the exact original. `patch_looper.py` does the same from the command line. Neither the stock firmware nor any patched image is included. `LOOPER=1 ./build.sh` does not touch the live page; `LOOPER=1 PUBLISH=1 ./build.sh` replaces `docs/looper/index.html` when a build is ready.
 
 Install the new `BLUEBOX.BIN` as any bluebox firmware: copy it to the root of the microSD card, hold **A** while powering on, and let go when "Bluebox Installer" appears. TOOLS then shows the looper readout, e.g. `4s 1.5M`, in the middle field.
 
@@ -77,11 +79,39 @@ Time, Feedb, Echo and Type (knob group 2) and the Ping button run the stock FX1 
 
 On the bluebox the CPU bar stays green with Keep + Tape + Ping.
 
+## Transient shaper and compressor (TRACK pages 3 and 4)
+
+The looper build replaces Cobalt's per-track noise gate with a **transient shaper** and adds a per-track **compressor**. Both are C ports of the Joebox 3.5 algorithms, checked sample for sample against the original code in the emulator (`tests/test_transient.py`, `tests/test_comp.py`). The Gate is retired: its TRACK knob and MIXER column now control TRANSIENT, and saved Gate thresholds are ignored.
+
+**The TRACK button** now cycles through four pages: the TRACK view → Side Chain → page 3 (transient) → page 4 (compressor) → back to the TRACK view.
+
+**TRANSIENT on/off.** In the TRACK view the bottom-right knob (beside OUT2, where GATE was) reads `TRANS ON` / `OFF`: tap it or turn encoder 4. In MIXER the Gate column is now **Trans** (`TS` when OUT3 is present), one on/off per track; Main shows N/A. The shaper runs only while TRANSIENT is on.
+
+**Page 3: shaper settings** (per track, saved in the project):
+
+| Control | Range | What it does |
+|---|---|---|
+| Model | Differ / Punch / Smooth | The Joebox detector model |
+| Attack | −100 … +100 % | Boost or soften the hit |
+| Sustain | −100 … +100 % | Boost or tame the tail |
+| Speed | 0 … 100 % | Detector speed |
+| Length | 0 … 100 % | How long the attack stage lasts |
+| Output | −12 … +12 dB | Output gain |
+| Mix | 0 … 100 % | Dry/wet |
+
+Encoders 1–4 turn Attack, Sustain, Speed and Length. Tap Model, Output or Mix to put it on encoder 4; tap Length to give encoder 4 back. Attack and Sustain at 0 with Output at 0 dB pass the audio unchanged.
+
+**Page 4: compressor.** Encoder 1 picks the mode: Off, Glue, Punch, Opto, Squash or Limit (the Joebox master compressor table, bit for bit). Encoder 2 is Thresh, −24 … +12 dB: an offset to the mode's threshold, or for Limit the drive into a fixed −0.3 dBFS ceiling. Joebox's Limit delays the audio 1.5 ms (lookahead); here every mode runs with no delay, so Limit lets slightly more peaks reach the hard clip (2.9 % against 2.4 % of samples on a loud drum test). The compressor runs after the shaper, and it runs whether TRANSIENT is on or off. Its CPU cost is estimated at about 110–120 instructions per stereo sample per track, so many tracks at once can add noticeably to the CPU meter; this has not been measured on hardware.
+
+**How it works.** Ten new per-track settings, `0x1be`–`0x1c7`, in empty stock definition slots (track settings lists: 62 of 68 entries used). The M7 runs the shaper and compressor after the old gate point in each track's chain, with state in one SDRAM block allocated at boot (`ts_allocate`). The M4 code (`src/transient_m4.h`) lives in the cue-icon payload, because the Cobalt M4 code space is full. It rebinds the TRACK panel's eight knobs from a new page flag (2 = page 3, 3 = page 4), relabels them, and draws the boxes. `tests/test_transient_page.py` drives the TRACK button cycle, the knobs, the labels and the MIXER column through the real UI code in the emulator. The old Gate tests are kept in `tests/retired_gate/`.
+
+**Hardware:** build `ddb1f45d…` on the same bluebox: the TRACK cycle to pages 3 and 4, the TRANSIENT button, the page-3 labels and the compressor page were confirmed. The sound of each model and mode, and the CPU load with many tracks, have not been checked in detail.
+
 ## Hardware testing (one device)
 
-All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `162a50a3…`, `c2c58e04…` (header tempo rounded), `e7dd3237…` (header tempo with the decimal), `f4fab10b…` (version 12), `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
+All hardware testing so far was done on **one bluebox desktop** (official firmware 1.5.2), with the current looper image `ddb1f45d…` (transient shaper and compressor), `162a50a3…`, `c2c58e04…` (header tempo rounded), `e7dd3237…` (header tempo with the decimal), `f4fab10b…` (version 12), `3f14345a…` (version 10), `1438c1ad…` (external tempo), `73d9066f…` (song-position lock), `dc79805d…` (before Stretch) and earlier development builds, clocked by a 1010music Blackbox as master. Results on other units may differ, for example in how much SDRAM is free when FX1 is built.
 
-Current build (`162a50a3…`), clocked by the Blackbox at 126 BPM:
+Build `162a50a3…`, clocked by the Blackbox at 126 BPM:
 
 | | |
 |---|---|
@@ -149,7 +179,8 @@ Confirmed on that unit:
 - with the Blackbox as master clock, the loop follows project changes with slightly different tempos (e.g. 126 → 128), and the looper detects the external tempo and records the next loop in sync without touching the bluebox BPM (`1438c1ad…`);
 - 2-bar takes at 128 BPM on the bar lines: ARMED, REC 1/2, REC 2/2, PLAY (photos above);
 - version 10 (`3f14345a…`) installed and tested: Echo on the loop, the new page layout and knob groups, transport stop, OVDUB and the Sync lock;
-- current build `162a50a3…`: the new layout (Sync in knob group 1, BEAT bottom right), the header tempo in full past bar 100 (`104:2 126`, bar-count label widened from 100 to 124 px), TOOLS `4s 1.5M` inside its field (photos above);
+- current build `ddb1f45d…`: the TRACK button cycle (view → Side Chain → page 3 → page 4), the TRANSIENT button in the TRACK view and MIXER, the page-3 shaper labels and the page-4 compressor page;
+- build `162a50a3…`: the new layout (Sync in knob group 1, BEAT bottom right), the header tempo in full past bar 100 (`104:2 126`, bar-count label widened from 100 to 124 px), TOOLS `4s 1.5M` inside its field (photos above);
 - build `c2c58e04…`: the header tempo rounded to whole BPM (`128`, `126`), ARMED, REC 1/2 and 2/2 on the bar lines, OVDUB, echo types Warp, Duck and Delay, Ping, and the loop following the Blackbox from 128 to 126 with Stretch Keep and Vari (photos above);
 - build `e7dd3237…`: the detected tempo in the header (decimal clipped by the label), 2-bar takes on the bar lines, OVDUB, the knob groups on the physical knobs, echo types Warp and Delay, Ping, and the loop following a tempo change to 128 with Stretch Keep (photos above);
 - the echo Type knob and the CPU: the CPU bar stays green with Stretch Keep, Tape echo and Ping (version 11), and the current build `f4fab10b…` with the smooth Vari/Keep lock;

@@ -556,6 +556,8 @@ static void dly_send_into(uint8_t *rev, void *ctx)
 }
 
 #include "shoegaze_m7.h"
+#define TS_ALLOCATOR
+#include "transient_m7.h"
 /* Stock styles are retained; the experimental style has independent state. */
 unsigned delay_reverb_process(uint8_t *obj,void *ctx) {
     dly_send_into(obj,ctx);
@@ -612,5 +614,6 @@ unsigned dly_construct(uint8_t *obj) {
     x_reset(XS,obj);
     rc_reset(RC,obj);
     sg_allocate();
+    ts_allocate();
     return result;
 }

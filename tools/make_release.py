@@ -45,7 +45,7 @@ for slot in (4,32):
     add(f'purple UI palette slot {slot}',0x0814d230+4*slot,
         struct.pack('<I',0xffff6af3),struct.pack('<I',0xff9455fa))
 PC={f[2]:int(f[0],16) for line in (ROOT/'build'/'pcm4.symbols').read_text().splitlines() if len(f:=line.split())==3}
-add('parameter definitions final call',0x08135fec,branch(0x08135fec,0x08134c8c),branch(0x08135fec,PC['pc_defs_hook']))
+add('parameter definitions final call',0x08135fec,branch(0x08135fec,0x08134c8c),branch(0x08135fec,cue4['ts_defs']))
 add('master defaults final add',0x08120848,branch(0x08120848,0x0812028e),branch(0x08120848,symbols(4)['sat_default']))
 add('master settings saturation row',0x0814aea2,bytes(8),struct.pack('<4H',0x43,0x1b6,0x1b7,0x1b8))
 # Extended delay: independently mapped desktop 1.5.2 locations.
@@ -106,13 +106,17 @@ for at,old,new in [(0x0804f8be,0x0804bab0,'gate_meter_mono_shim'),(0x0804f9c6,0x
  add('Gate input meter '+hex(at),at,branch(at,old),branch(at,ngs[new]))
 for at in [0x0804304a,0x08050c96,0x08051062]:
  add('gate EQ owner constructor '+hex(at),at,branch(at,0x08042e60),branch(at,ngs['gate_construct']))
-add('TRACK Gate fine encoder',0x08133248,branch(0x08133248,0x08127d50),branch(0x08133248,symbols(4)['gate_turn']))
+add('TRACK Gate fine encoder',0x08133248,branch(0x08133248,0x08127d50),branch(0x08133248,cue4['ts_gate_turn']))
 add('Gate knob Off formatting',0x08127a08,branch(0x08127a08,0x081403c4),branch(0x08127a08,symbols(4)['gate_db_shim']))
-add('channel defaults append gate',0x08120534,branch(0x08120534,0x0812028e),branch(0x08120534,symbols(4)['gate_default']))
-add('MIXER construct sixth Gate button',0x081349dc,branch(0x081349dc,0x0812dadc),branch(0x081349dc,symbols(4)['gate_mix_construct']))
-add('MIXER ignore Main gate edits',0x0814b7d8,struct.pack('<I',0x0812e755),struct.pack('<I',symbols(4)['gate_mix_event']|1))
-add('MIXER shared Gate edit commit',0x0814b7d4,struct.pack('<I',0x0812e469),struct.pack('<I',symbols(4)['gate_mix_local']|1))
-add('TRACK shared Gate edit commit',0x0814bb6c,struct.pack('<I',0x08132e39),struct.pack('<I',symbols(4)['gate_track_local']|1))
+add('channel defaults append gate',0x08120534,branch(0x08120534,0x0812028e),branch(0x08120534,cue4['ts_gate_default']))
+add('MIXER construct sixth Gate button',0x081349dc,branch(0x081349dc,0x0812dadc),branch(0x081349dc,cue4['ts_mix_construct']))
+add('MIXER ignore Main gate edits',0x0814b7d8,struct.pack('<I',0x0812e755),struct.pack('<I',cue4['ts_mix_event']|1))
+add('MIXER shared Gate edit commit',0x0814b7d4,struct.pack('<I',0x0812e469),struct.pack('<I',cue4['ts_mix_local']|1))
+# TRACK page 3: the TRACK button's handler (button 1, r0 = app) calls
+# ts_track_key, then takes the native exit. View -> Side Chain -> page 3 -> view.
+add('TRACK button page 3',0x08123ad8,bytes.fromhex('00f5e04393f8'),branch(0x08123ad8,cue4['ts_track_key'])+bytes.fromhex('18e0'))
+add('TRACK page 3 flag on the native page change',0x081345fe,branch(0x081345fe,0x081327cc),branch(0x081345fe,cue4['ts_subpage']))
+add('TRACK shared Gate edit commit',0x0814bb6c,struct.pack('<I',0x08132e39),struct.pack('<I',cue4['ts_track_local']|1))
 # Phones Src AUTO: cue bus while a track has its cue on, otherwise Main;
 # the same cue and input masks feed the track header icons (cue_m4.c).
 cuecode=(ROOT/'build'/'cue7.bin').read_bytes()
@@ -123,19 +127,20 @@ add('output node phones auto process pointer',0x0806aa00,struct.pack('<I',0x0804
 add('mixer node process pointer records the mixer',0x0806af38,struct.pack('<I',0x0804fbad),struct.pack('<I',cues['cue_mixer_process']|1))
 add('Phones Src three choices',0x081358dc,bytes.fromhex('0223'),bytes.fromhex('0323'))
 add('Phones Src CUE MAIN AUTO list',0x08135b28,struct.pack('<I',0x0814bf34),struct.pack('<I',cues['cue_phones_names']))
-add('MIXER sends Gate selector',0x0814b7f4,bytes(2),struct.pack('<H',0x1ae))
+# The Gate's MIXER button now selects the TRANSIENT on/off column (TS_ON).
+add('MIXER sends Gate selector',0x0814b7f4,bytes(2),struct.pack('<H',0x1c5))
 for at in [0x0812e4c0,0x0812e4d0]:
  add('MIXER seventh button range '+hex(at),at,bytes.fromhex('0528' if at==0x0812e4c0 else '0529'),bytes.fromhex('0628' if at==0x0812e4c0 else '0629'))
 for at in [0x0812e4d8,0x0812e6a4]:
  add('MIXER sends selection '+hex(at),at,branch(at,0x0812e2e0),branch(at,symbols(4)['gate_mix_select']))
 for at in [0x081331c0,0x081331dc,0x081331fe]:
- add('Track Gate knob binding '+hex(at),at,branch(at,0x081328f8),branch(at,symbols(4)['gate_track_bind']))
+ add('Track Gate knob binding '+hex(at),at,branch(at,0x081328f8),branch(at,cue4['ts_gate_track_bind']))
 # Gate uses native default/Vol metering. The earlier detector-input report
 # overrides are not installed; the compiled Gate processing stays unchanged.
 for at in [0x0812e830,0x08134586]:
- add('MIXER Gate label '+hex(at),at,branch(at,0x0812e54c),branch(at,symbols(4)['gate_mix_setup']))
+ add('MIXER Gate label '+hex(at),at,branch(at,0x0812e54c),branch(at,cue4['ts_mix_setup']))
 for at in [0x0812e3e0,0x0812e77e,0x0812e7ea,0x0812e84e]:
- add('MIXER Gate fader '+hex(at),at,branch(at,0x0812dde8),branch(at,symbols(4)['gate_column']))
+ add('MIXER Gate fader '+hex(at),at,branch(at,0x0812dde8),branch(at,cue4['ts_column']))
 # Overdub/recording throughput fix (from the hardware-tested C16 experiment,
 # without its diagnostics). Three native PCM24 recording call sites and two
 # playback call sites go to the word/burst wrappers; the stereo-left call

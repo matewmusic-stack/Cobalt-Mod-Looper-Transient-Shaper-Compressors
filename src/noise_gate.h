@@ -21,7 +21,7 @@ static float ng_exp2(float x) {
     float p=1.f+f*(.6931472f+f*(.2402265f+f*(.0555041f+f*(.0096181f+f*.0013334f))));
     union {float f;uint32_t u;} v={p};v.u+=(uint32_t)fl<<23;return v.f;
 }
-static void ng_event(struct noise_gate *g,int value) {
+static __attribute__((unused)) void ng_event(struct noise_gate *g,int value) {
     if(value<NG_OFF)value=NG_OFF;
     if(value> -12000)value=-12000;
     if(g->threshold==value)return;
