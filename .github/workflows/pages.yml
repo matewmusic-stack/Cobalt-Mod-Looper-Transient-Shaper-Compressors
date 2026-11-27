@@ -1,7 +1,8 @@
-# Checks that need no firmware, then publishes the patcher page.
+# Checks that need no firmware. GitHub Pages serves docs/ on main directly
+# (Settings > Pages: Deploy from a branch, main /docs).
 # The full emulator suite needs the proprietary 1.5.2 image, so it runs
 # locally: python3 tests/run_checks.py /path/to/BLUEBOX.BIN
-name: Check and deploy patcher
+name: Check patcher
 
 on:
   push:
@@ -13,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages-${{ github.ref }}
+  group: checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -70,22 +71,3 @@ jobs:
             ASAN_OPTIONS=detect_leaks=0 "/tmp/${t}_host" | tail -n 1
           done
 
-  deploy:
-    needs: check
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: docs
-      - id: deployment
-        uses: actions/deploy-pages@v5
