@@ -81,7 +81,7 @@ def adapt(page, manifest):
         ('<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup.</p>',
          '<p class="notice">Use the original official desktop 1.5.2 firmware. Keep your working firmware and a project backup. '
          '<b>This build has been tested on one bluebox desktop only.</b> '
-         '<a href="https://github.com/matewmusic-stack/Cobalt-Mod---Looper-Transient-Shaper-Compressors#hardware-testing-one-device">What was tested</a></p>'),
+         '<a href="https://github.com/matewmusic-stack/Cobalt-Mod-Looper-Transient-Shaper-Compressors#hardware-testing-one-device">What was tested</a></p>'),
         # Theme preview: the FX1 mode list (B on the FX page).
         ("listRows(P,['Delay','Warp delay','Granular','Tape','Ducked','Reverse']",
          "listRows(P,['Delay','Warp delay','Phrase Looper','Tape','Ducked','Reverse']"),
